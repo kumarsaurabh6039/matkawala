@@ -1,0 +1,39 @@
+name: trade_mark
+description: "A new Flutter project with Firebase Authentication."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Firebase Core for initialization
+  firebase_core: ^3.10.1
+  # Firebase Auth for login/register
+  firebase_auth: ^5.4.4
+  # Icons
+  cupertino_icons: ^1.0.6
+  cloud_firestore: ^5.6.12
+  intl: ^0.20.2
+ # Bluetooth thermal printing packages - corrected blue_thermal_printer
+  esc_pos_utils_plus: ^2.0.0
+  blue_thermal_printer: ^1.2.3
+  permission_handler: ^12.0.1
+  shared_preferences: ^2.2.3
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+
+  # Assets section add kiya gaya hai
+  assets:
+    - assets/logo.png
+    # Agar aap pure folder ko ek saath add karna chahte hain toh niche wala line use karein:
+    # - assets/

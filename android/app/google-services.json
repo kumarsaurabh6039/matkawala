@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "799549534277",
+    "project_id": "form-app-63830",
+    "storage_bucket": "form-app-63830.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:799549534277:android:c34c89f836fb21974df32c",
+        "android_client_info": {
+          "package_name": "com.example.damini_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcjVuz1cBAmB0sPgYZsZDZzyW1JOYEnjE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:799549534277:android:6f51d04e9a440a934df32c",
+        "android_client_info": {
+          "package_name": "com.example.form_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcjVuz1cBAmB0sPgYZsZDZzyW1JOYEnjE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:799549534277:android:8799ff95e1ebbd114df32c",
+        "android_client_info": {
+          "package_name": "com.example.trade_mark"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcjVuz1cBAmB0sPgYZsZDZzyW1JOYEnjE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
