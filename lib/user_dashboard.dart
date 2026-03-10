@@ -6,27 +6,30 @@ import 'package:intl/intl.dart';
 import 'dart:async';
 import 'dart:typed_data';
 
-// --- NEW PACKAGES IMPORT FOR PRINTING ---
+// --- NEW PACKAGES IMPORT FOR PRINTING & PDF ---
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
-// --- THEME COLORS (MNC Corporate Dark & Gold) ---
-const Color kBgColor = Colors.white; 
-const Color kCardColor = Color(0xFF1E1E1E);
-const Color kPrimary = Color(0xFFFFD700); // Gold
+// --- THEME COLORS (MNC Corporate Light Theme) ---
+const Color kBgColor = Color(0xFFF0F2F5); // Light greyish background for contrast
+const Color kCardColor = Colors.white; // Solid white for cards
+const Color kPrimary = Color(0xFF1A73E8); // Professional Google Blue
 const Color kAccent = Color(0xFFE53935); // Red
-const Color kTextWhite = Colors.white;
-const Color kTextGrey = Colors.white70;
-const Color kSuccess = Color(0xFF00C853);
+const Color kTextMain = Color(0xFF202124); // Dark text for white backgrounds
+const Color kTextSub = Color(0xFF5F6368); // Grey subtext
+const Color kSuccess = Color(0xFF0F9D58); // Green
 const Color kPurpleLedger = Color(0xFF7B1FA2); // For 'Baki' strip
 
-// --- WHATSAPP THEME COLORS ---
-const Color kWABg = Color(0xFF0B141A);       // Dark Background
-const Color kWABubbleSelf = Color(0xFF005D4B); // Green Bubble
-const Color kWAInputBg = Color(0xFF1F2C34);  // Input Bar
-const Color kWAFab = Color(0xFF00A884);      // Send Button
+// --- WHATSAPP THEME COLORS (Light Mode) ---
+const Color kWABg = Color(0xFFEFE7DD);       // Light chat background
+const Color kWABubbleSelf = Color(0xFFDCF8C6); // Light green bubble
+const Color kWAInputBg = Colors.white;       // Input Bar
+const Color kWAFab = Color(0xFF1A73E8);      // Send Button
 
 class UserDashboard extends StatefulWidget {
   const UserDashboard({super.key});
@@ -38,12 +41,39 @@ class UserDashboard extends StatefulWidget {
 class _UserDashboardState extends State<UserDashboard> {
   int _selectedIndex = 0;
   String _selectedLang = 'mr'; // Default Marathi
+  DateTime _lastReadTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLastReadTime();
+  }
+
+  Future<void> _loadLastReadTime() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    int ms = prefs.getInt('last_notification_read') ?? 0;
+    if(mounted) {
+      setState(() {
+        _lastReadTime = DateTime.fromMillisecondsSinceEpoch(ms);
+      });
+    }
+  }
+
+  Future<void> _markNotificationsAsRead() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('last_notification_read', DateTime.now().millisecondsSinceEpoch);
+    if(mounted) {
+      setState(() {
+        _lastReadTime = DateTime.now();
+      });
+    }
+  }
 
   // --- TRANSLATIONS MAP ---
   final Map<String, Map<String, String>> _trans = {
     'en': {
       'title': 'MATKAWALA',
-      'wallet': 'WALLET',
+      'wallet': 'LIMIT',
       'play': 'Live Market',
       'ledger': 'Select Market', 
       'chat': 'Support',
@@ -80,7 +110,7 @@ class _UserDashboardState extends State<UserDashboard> {
       'pass_updated': 'Password Updated! Please Login Again.',
       'no_valid_bets': 'No valid bets found! Check format.',
       'success_bets': 'Bets Placed Successfully!',
-      'insufficient': 'तुमच्या खात्यात पुरेशी रक्कम नाही! (Insufficient Balance)',
+      'insufficient': 'तुमची लिमिट संपली आहे! (Insufficient Limit)',
       'official_receipt': 'Official Receipt',
       'date': 'Date',
       'id': 'ID',
@@ -95,7 +125,7 @@ class _UserDashboardState extends State<UserDashboard> {
     },
     'mr': {
       'title': 'मटकावाला',
-      'wallet': 'शिल्लक',
+      'wallet': 'लिमिट',
       'play': 'लाइव्ह मार्केट',
       'ledger': 'मार्केट निवडा', 
       'chat': 'मदत',
@@ -132,7 +162,7 @@ class _UserDashboardState extends State<UserDashboard> {
       'pass_updated': 'पासवर्ड अपडेट झाला! कृपया पुन्हा लॉगिन करा.',
       'no_valid_bets': 'वैध बेट्स सापडले नाहीत!',
       'success_bets': 'बेट्स यशस्वीरित्या लावले!',
-      'insufficient': 'तुमच्या खात्यात पुरेशी रक्कम नाही! (Insufficient Balance)',
+      'insufficient': 'तुमची लिमिट संपली आहे! (Insufficient Limit)',
       'official_receipt': 'अधिकृत पावती',
       'date': 'तारीख',
       'id': 'आयडी',
@@ -169,16 +199,18 @@ class _UserDashboardState extends State<UserDashboard> {
     return Scaffold(
       backgroundColor: kBgColor,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1F2C34),
-        title: Text(t('title'), style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
-        elevation: 0,
+        backgroundColor: Colors.white,
+        title: Text(t('title'), style: const TextStyle(color: kPrimary, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+        elevation: 1,
+        iconTheme: const IconThemeData(color: kTextMain),
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.language, color: kPrimary),
+            color: Colors.white,
             onSelected: _changeLanguage,
             itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-              const PopupMenuItem<String>(value: 'en', child: Text('English')),
-              const PopupMenuItem<String>(value: 'mr', child: Text('मराठी')),
+              const PopupMenuItem<String>(value: 'en', child: Text('English', style: TextStyle(color: kTextMain))),
+              const PopupMenuItem<String>(value: 'mr', child: Text('मराठी', style: TextStyle(color: kTextMain))),
             ],
           ),
           IconButton(
@@ -188,26 +220,72 @@ class _UserDashboardState extends State<UserDashboard> {
         ],
       ),
       body: pages[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: const Color(0xFF1F2C34),
-        currentIndex: _selectedIndex,
-        onTap: (index) => setState(() => _selectedIndex = index),
-        selectedItemColor: kPrimary,
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        items: [
-          BottomNavigationBarItem(icon: const Icon(Icons.dashboard), label: t('play')),
-          BottomNavigationBarItem(icon: const Icon(Icons.grid_view), label: t('ledger')), 
-          BottomNavigationBarItem(icon: const Icon(Icons.support_agent), label: t('chat')),
-          BottomNavigationBarItem(icon: const Icon(Icons.person), label: t('settings')),
-        ],
+      bottomNavigationBar: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('notifications').snapshots(),
+        builder: (context, snapshot) {
+          bool hasUnread = false;
+          if (snapshot.hasData) {
+            for (var doc in snapshot.data!.docs) {
+              var data = doc.data() as Map<String, dynamic>;
+              Timestamp? exp = data['expiresAt'];
+              
+              if (exp != null && exp.toDate().isBefore(DateTime.now())) {
+                FirebaseFirestore.instance.collection('notifications').doc(doc.id).delete();
+                continue;
+              }
+
+              Timestamp? ts = data['timestamp'];
+              if (ts != null && ts.toDate().isAfter(_lastReadTime)) {
+                hasUnread = true;
+              }
+            }
+          }
+
+          return BottomNavigationBar(
+            backgroundColor: Colors.white,
+            currentIndex: _selectedIndex,
+            onTap: (index) {
+              setState(() => _selectedIndex = index);
+              if (index == 3) {
+                _markNotificationsAsRead();
+              }
+            },
+            selectedItemColor: kPrimary,
+            unselectedItemColor: kTextSub,
+            type: BottomNavigationBarType.fixed,
+            elevation: 10,
+            items: [
+              BottomNavigationBarItem(icon: const Icon(Icons.dashboard), label: t('play')),
+              BottomNavigationBarItem(icon: const Icon(Icons.grid_view), label: t('ledger')), 
+              BottomNavigationBarItem(icon: const Icon(Icons.support_agent), label: t('chat')),
+              BottomNavigationBarItem(
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.person),
+                    if (hasUnread && _selectedIndex != 3) 
+                      Positioned(
+                        right: -2, top: -2,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                          constraints: const BoxConstraints(minWidth: 10, minHeight: 10),
+                        ),
+                      )
+                  ]
+                ),
+                label: t('settings')
+              ),
+            ],
+          );
+        }
       ),
     );
   }
 }
 
 // -----------------------------------------------------------------------------
-// 1. HOME GAMES TAB 
+// 1. HOME GAMES TAB (UPGRADED LIGHT UI)
 // -----------------------------------------------------------------------------
 class HomeGamesTab extends StatefulWidget {
   final String uid;
@@ -238,7 +316,7 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
   }
   
   Map<String, dynamic> _getMarketStatus(Map<String, dynamic> data) {
-    bool isForceClosed = data['isClosed'] ?? false;
+    bool isForceClosed = data['isClosed'] == true;
     if (isForceClosed) {
       return {'status': 'CLOSED', 'color': kAccent, 'isOpen': false, 'msg': widget.t('market_closed')};
     }
@@ -257,16 +335,16 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
       DateTime closeEnd = _parseTime(closeEndStr, now);
 
       if (now.isBefore(openStart)) {
-        return {'status': 'UPCOMING', 'color': kSuccess, 'isOpen': true, 'msg': "${widget.t('betting_open')} @ $openStartStr"};
+        return {'status': 'UPCOMING', 'color': Colors.blueAccent, 'isOpen': true, 'msg': "${widget.t('betting_open')} @ $openStartStr"};
       }
       else if (now.isAfter(openStart) && now.isBefore(openEnd)) {
-        return {'status': 'OPEN_RUNNING', 'color': Colors.green, 'isOpen': true, 'msg': widget.t('open_running')};
+        return {'status': 'OPEN_RUNNING', 'color': kSuccess, 'isOpen': true, 'msg': widget.t('open_running')};
       }
       else if (now.isAfter(openEnd) && now.isBefore(closeStart)) {
         return {'status': 'WAITING', 'color': Colors.orange, 'isOpen': false, 'msg': widget.t('betting_closed')};
       }
       else if (now.isAfter(closeStart) && now.isBefore(closeEnd)) {
-        return {'status': 'CLOSE_RUNNING', 'color': Colors.green, 'isOpen': true, 'msg': widget.t('close_running')};
+        return {'status': 'CLOSE_RUNNING', 'color': kSuccess, 'isOpen': true, 'msg': widget.t('close_running')};
       }
       else {
         return {'status': 'CLOSED', 'color': kAccent, 'isOpen': false, 'msg': widget.t('market_closed')};
@@ -311,26 +389,42 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
         StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
           builder: (context, snapshot) {
-            var balance = 0;
+            var limit = 0;
+            bool showLimit = true;
             if (snapshot.hasData && snapshot.data!.exists) {
-              balance = (snapshot.data!.data() as Map<String, dynamic>)['balance'] ?? 0;
+              var data = snapshot.data!.data() as Map<String, dynamic>;
+              limit = data['limit'] ?? data['creditLimit'] ?? 0;
+              showLimit = data['showLimitToUser'] ?? true;
             }
             return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 25),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF1F2C34), Colors.black]),
-                border: Border(bottom: BorderSide(color: kPrimary.withOpacity(0.3))),
+                color: Colors.white,
+                borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 5))]
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(widget.t('wallet').toUpperCase(), style: const TextStyle(color: kTextGrey, fontSize: 14, fontWeight: FontWeight.bold)),
-                  Text("₹ $balance", style: const TextStyle(color: kPrimary, fontSize: 24, fontWeight: FontWeight.bold)),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("AVAILABLE LIMIT", style: TextStyle(color: kTextSub, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+                      const SizedBox(height: 5),
+                      Text(showLimit ? "₹ $limit" : "---", style: const TextStyle(color: kPrimary, fontSize: 28, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: kPrimary.withOpacity(0.1), shape: BoxShape.circle),
+                    child: const Icon(Icons.account_balance_wallet, color: kPrimary, size: 35),
+                  ),
                 ],
               ),
             );
           },
         ),
+        const SizedBox(height: 10),
         Expanded(
           child: StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance.collection('games').orderBy('order').snapshots(),
@@ -338,7 +432,7 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
               if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: kPrimary));
               
               return ListView.builder(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 itemCount: snapshot.data?.docs.length ?? 0,
                 itemBuilder: (context, index) {
                   var doc = snapshot.data!.docs[index];
@@ -348,17 +442,14 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
                   
                   return GestureDetector(
                     onTap: () {
-                      if (!status['isOpen']) {
-                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(status['msg'])));
-                         return;
-                      }
+                      // ALLOW OPENING CHART EVEN IF CLOSED
                       Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (context) => ChartBettingScreen(
                             uid: widget.uid,
                             gameId: doc.id,
-                            gameName: data['name'],
+                            gameName: data['name'] ?? '',
                             openBetStart: data['openBetStart'] ?? '09:00 AM',
                             openBetEnd: data['openBetEnd'] ?? '10:00 AM',
                             closeBetStart: data['closeBetStart'] ?? '10:00 AM',
@@ -369,35 +460,53 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
                       );
                     },
                     child: Container(
-                      margin: const EdgeInsets.only(bottom: 12),
+                      margin: const EdgeInsets.only(bottom: 15),
                       decoration: BoxDecoration(
-                        color: kCardColor,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white.withOpacity(0.05)),
-                        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4, offset: Offset(0, 2))],
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.grey.shade200, width: 1.5),
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 4))],
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(16.0),
                         child: Row(
                           children: [
                             Container(
-                              width: 50, height: 50,
-                              decoration: BoxDecoration(shape: BoxShape.circle, color: status['color'].withOpacity(0.1), border: Border.all(color: status['color'])),
-                              child: Center(child: Text(data['name'][0], style: TextStyle(color: status['color'], fontWeight: FontWeight.bold, fontSize: 22))),
+                              width: 55, height: 55,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle, 
+                                color: status['color'].withOpacity(0.1),
+                                border: Border.all(color: status['color'].withOpacity(0.5), width: 1.5)
+                              ),
+                              child: Center(child: Icon(Icons.play_arrow_rounded, color: status['color'], size: 30)),
                             ),
                             const SizedBox(width: 16),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(data['name'], style: const TextStyle(color: kTextWhite, fontWeight: FontWeight.bold, fontSize: 18)),
-                                  const SizedBox(height: 4),
-                                  Text("${widget.t('open')}: ${data['openTime']}  •  ${widget.t('close')}: ${data['closeTime']}", style: const TextStyle(color: kTextGrey, fontSize: 12)),
+                                  Text(data['name'] ?? '', style: const TextStyle(color: kTextMain, fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 1.1)),
                                   const SizedBox(height: 6),
-                                  Text(status['msg'], style: TextStyle(color: status['color'], fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.access_time, color: kTextSub, size: 14),
+                                      const SizedBox(width: 4),
+                                      Text("${data['openTime']} - ${data['closeTime']}", style: const TextStyle(color: kTextSub, fontSize: 12)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: status['color'].withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8)
+                                    ),
+                                    child: Text(status['msg'], style: TextStyle(color: status['color'], fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                                  ),
                                 ],
                               ),
                             ),
+                            const Icon(Icons.arrow_forward_ios_rounded, color: Colors.grey, size: 18),
                           ],
                         ),
                       ),
@@ -414,7 +523,7 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
 }
 
 // -----------------------------------------------------------------------------
-// 2. CHART BETTING SCREEN
+// 2. CHART BETTING SCREEN (UPDATED VALIDATION & DATE LOGIC)
 // -----------------------------------------------------------------------------
 class ChartBettingScreen extends StatefulWidget {
   final String uid;
@@ -447,7 +556,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
   
   double _sendButtonScale = 1.0;
   bool _isLoading = false;
-  DateTime? _selectedDate;
+  late DateTime _selectedDate;
   Timer? _realTimeSyncTimer;
 
   BlueThermalPrinter get bluetooth => BlueThermalPrinter.instance;
@@ -455,6 +564,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
   @override
   void initState() {
     super.initState();
+    _selectedDate = DateTime.now(); // Default is ALWAYS today
     _realTimeSyncTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted) setState(() {});
     });
@@ -491,13 +601,13 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
   Future<void> _pickDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: _selectedDate ?? DateTime.now(),
+      initialDate: _selectedDate,
       firstDate: DateTime(2024),
-      lastDate: DateTime.now(),
+      lastDate: DateTime.now(), // Disable future dates
       builder: (context, child) {
         return Theme(
           data: ThemeData.light().copyWith(
-            colorScheme: const ColorScheme.light(primary: Colors.black, onPrimary: Colors.white, surface: Colors.white),
+            colorScheme: const ColorScheme.light(primary: kPrimary, onPrimary: Colors.white, surface: Colors.white),
           ),
           child: child!,
         );
@@ -511,9 +621,9 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
   }
 
   Future<void> _sendMessageAndPlaceBet(String currentSession, bool isMarketOpen) async {
-    if (!isMarketOpen) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Betting is currently CLOSED for this market."), backgroundColor: Colors.red));
-      return;
+    bool isToday = _selectedDate.year == DateTime.now().year && _selectedDate.month == DateTime.now().month && _selectedDate.day == DateTime.now().day;
+    if (!isMarketOpen || !isToday) {
+      return; // Disabled from UI, extra check here
     }
 
     String text = _inputCtrl.text;
@@ -523,23 +633,24 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     await Future.delayed(const Duration(milliseconds: 150));
     setState(() => _sendButtonScale = 1.0);
 
-    DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.uid).get();
-    Map<String, dynamic> userRatesData = {};
-    if(userDoc.exists) {
-      userRatesData = userDoc.data() as Map<String, dynamic>;
-    }
-
-    List<Map<String, dynamic>> parsedBets = _parseBets(text, currentSession, userRatesData);
-    if (parsedBets.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(widget.t('no_valid_bets'))));
-      return;
-    }
-
-    int msgTotal = parsedBets.fold(0, (sum, item) => sum + (item['amount'] as int));
-
     setState(() => _isLoading = true);
 
     try {
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.uid).get();
+      Map<String, dynamic> userRatesData = {};
+      if(userDoc.exists) {
+        userRatesData = userDoc.data() as Map<String, dynamic>;
+      }
+
+      // STRICT VALIDATION
+      List<Map<String, dynamic>> parsedBets = _parseBets(text, currentSession, userRatesData);
+      
+      if (parsedBets.isEmpty) {
+        throw Exception("कृपया सही फॉर्मेट में बिड टाइप करें! (e.g. 145*10)");
+      }
+
+      int msgTotal = parsedBets.fold(0, (sum, item) => sum + (item['amount'] as int));
+
       final userRef = FirebaseFirestore.instance.collection('users').doc(widget.uid);
       final chatRef = userRef.collection('game_chats').doc();
       String newChatId = chatRef.id;
@@ -548,7 +659,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
         DocumentSnapshot gameSnap = await transaction.get(FirebaseFirestore.instance.collection('games').doc(widget.gameId));
         if (gameSnap.exists) {
           var gData = gameSnap.data() as Map<String, dynamic>;
-          if (gData['isClosed'] == true) throw Exception("मार्केट सध्या बंद आहे! (Market Closed by Admin)");
+          if (gData['isClosed'] == true) throw Exception("मार्केट फिलहाल बंद है! (Market Closed by Admin)");
           
           DateTime now = DateTime.now();
           DateTime oStart = _parseTime(gData['openBetStart'] ?? '09:00 AM', now);
@@ -560,21 +671,23 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
           if (now.isAfter(oStart) && now.isBefore(oEnd)) stillOpen = true;
           else if (now.isAfter(cStart) && now.isBefore(cEnd)) stillOpen = true;
 
-          if (!stillOpen) throw Exception("मार्केटची वेळ संपली आहे! (Time Over)");
+          if (!stillOpen) throw Exception("मार्केट का समय समाप्त हो गया है! (Time Over)");
         }
 
         DocumentSnapshot userSnap = await transaction.get(userRef);
         if (!userSnap.exists) throw Exception("User not found!");
 
         var uData = userSnap.data() as Map<String, dynamic>;
-        int currentBalance = (uData['balance'] as num?)?.toInt() ?? 0;
-        int limit = (uData['creditLimit'] as num?)?.toInt() ?? 0;
+        
+        int currentLimit = (uData['limit'] ?? uData['creditLimit'] ?? 0).toInt();
 
-        if (currentBalance - msgTotal < -limit) {
-          throw Exception("तुमची लिमिट संपली आहे! (Credit Limit Exceeded)");
+        if (currentLimit < msgTotal) {
+          throw Exception("तुम्हारी लिमिट ख़तम हो गयी है! (Insufficient Limit)");
         }
 
-        transaction.update(userRef, {'balance': currentBalance - msgTotal});
+        transaction.update(userRef, {
+           'limit': currentLimit - msgTotal
+        });
 
         for (var bet in parsedBets) {
           DocumentReference betRef = FirebaseFirestore.instance.collection('bets').doc();
@@ -610,35 +723,35 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     } catch (e) {
       if (mounted) {
         String errMsg = e.toString().replaceAll("Exception:", "").trim();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errMsg), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errMsg), backgroundColor: Colors.red, duration: const Duration(seconds: 4)));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // --- PRINTING & ACTION LOGIC ---
   void _showOptions(Map<String, dynamic> data) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: kCardColor,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
         return SafeArea(
           child: Wrap(
             children: [
               ListTile(
-                leading: const Icon(Icons.copy, color: Colors.white),
-                title: const Text('Copy (कॉपी)', style: TextStyle(color: Colors.white)),
+                leading: const Icon(Icons.copy, color: kTextMain),
+                title: const Text('Copy (कॉपी)', style: TextStyle(color: kTextMain)),
                 onTap: () {
-                  Clipboard.setData(ClipboardData(text: data['text'] ?? ''));
+                  // Copies ONLY the raw bid text placed by the user, without Name or Date
+                  Clipboard.setData(ClipboardData(text: (data['text'] ?? '').toString().trim()));
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('बिड कॉपी हो गई (Bid Copied)')));
                 }
               ),
               ListTile(
                 leading: const Icon(Icons.edit, color: Colors.blue),
-                title: const Text('Edit (बदल करा)', style: TextStyle(color: Colors.white)),
+                title: const Text('Edit (बदल करा)', style: TextStyle(color: kTextMain)),
                 onTap: () {
                   Navigator.pop(context);
                   _editBet(data);
@@ -646,7 +759,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text('Delete (हटवा)', style: TextStyle(color: Colors.white)),
+                title: const Text('Delete (हटवा)', style: TextStyle(color: kTextMain)),
                 onTap: () {
                   Navigator.pop(context);
                   _deleteBet(data);
@@ -654,7 +767,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.print, color: Colors.green),
-                title: const Text('Print (प्रिंट करा)', style: TextStyle(color: Colors.white)),
+                title: const Text('Print (प्रिंट करा)', style: TextStyle(color: kTextMain)),
                 onTap: () {
                   Navigator.pop(context);
                   _printBet(data);
@@ -671,11 +784,11 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     return await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: kCardColor,
-        title: Text(title, style: const TextStyle(color: Colors.white)),
-        content: Text(content, style: const TextStyle(color: Colors.white70)),
+        backgroundColor: Colors.white,
+        title: Text(title, style: const TextStyle(color: kTextMain, fontWeight: FontWeight.bold)),
+        content: Text(content, style: const TextStyle(color: kTextSub)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel', style: TextStyle(color: kTextSub))),
           TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Yes', style: TextStyle(color: Colors.red))),
         ],
       )
@@ -694,7 +807,9 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
       WriteBatch batch = FirebaseFirestore.instance.batch();
 
       var userRef = FirebaseFirestore.instance.collection('users').doc(widget.uid);
-      batch.update(userRef, {'balance': FieldValue.increment(refundAmount)}); 
+      batch.update(userRef, {
+         'limit': FieldValue.increment(refundAmount)
+      }); 
 
       for(var doc in betsQuery.docs) {
         batch.delete(doc.reference);
@@ -735,196 +850,228 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     }
   }
 
-  Future<BluetoothDevice?> _showPrinterSelectionDialog(List<BluetoothDevice> devices) async {
-    return showDialog<BluetoothDevice>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: kCardColor,
-          title: const Text("Select Printer", style: TextStyle(color: Colors.white)),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: devices.length,
-              itemBuilder: (context, index) {
-                return ListTile(
-                  title: Text(devices[index].name ?? 'Unknown', style: const TextStyle(color: Colors.white)),
-                  subtitle: Text(devices[index].address ?? '', style: const TextStyle(color: Colors.grey)),
-                  onTap: () {
-                    Navigator.pop(context, devices[index]);
-                  }
-                );
-              }
-            )
-          )
-        );
-      }
-    );
-  }
-
   Future<void> _printBet(Map<String, dynamic> data) async {
     try {
-      await Permission.bluetoothConnect.request();
-      await Permission.bluetoothScan.request();
-      await Permission.locationWhenInUse.request(); 
-
-      bool? isConnected = await bluetooth.isConnected;
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? savedAddress = prefs.getString('printer_address');
 
+      if (savedAddress == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("प्रिंटर सेटअप नहीं है! कृपया Profile -> Printer Settings में जाकर प्रिंटर कनेक्ट करें।", style: TextStyle(color: Colors.white)), backgroundColor: Colors.red, duration: Duration(seconds: 4)));
+        return;
+      }
+
+      bool? isConnected = await bluetooth.isConnected;
+      
       if (isConnected != true) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("प्रिंटर कनेक्ट हो रहा है...")));
         List<BluetoothDevice> devices = await bluetooth.getBondedDevices();
-        if (devices.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("No paired bluetooth printers found!")));
-          return;
+        BluetoothDevice? targetDevice;
+        try {
+           targetDevice = devices.firstWhere((d) => d.address == savedAddress);
+           await bluetooth.connect(targetDevice);
+           isConnected = true;
+        } catch(e) {
+           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("प्रिंटर कनेक्ट नहीं हो पाया! कृपया सेटिंग्स चेक करें।", style: TextStyle(color: Colors.white)), backgroundColor: Colors.red));
+           return;
+        }
+      }
+      
+      if (isConnected == true) {
+        var userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.uid).get();
+        String agentName = "Unknown";
+        if(userDoc.exists) {
+          var uData = userDoc.data() as Map<String, dynamic>;
+          agentName = uData['name'] ?? uData['email']?.split('@')[0] ?? widget.uid.substring(0, 5);
         }
 
-        BluetoothDevice? targetDevice;
-        if (savedAddress != null) {
-          targetDevice = devices.firstWhere(
-            (d) => d.address == savedAddress, 
-            orElse: () => devices.first
-          );
-        } else {
-          targetDevice = await _showPrinterSelectionDialog(devices);
-          if (targetDevice != null) {
-            await prefs.setString('printer_address', targetDevice.address!);
+        final profile = await CapabilityProfile.load();
+        final generator = Generator(PaperSize.mm58, profile);
+        List<int> bytes = [];
+
+        bytes += generator.text('Acknowledgement Slip', styles: const PosStyles(align: PosAlign.center));
+        
+        String sessionName = data['session'] ?? 'Open';
+        bytes += generator.text('${widget.gameName} $sessionName', styles: const PosStyles(align: PosAlign.center));
+
+        var time = (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
+        String dateStr = DateFormat('d/M/yyyy - h:mm a').format(time);
+        bytes += generator.text('Date: $dateStr', styles: const PosStyles(align: PosAlign.center));
+        bytes += generator.emptyLines(1);
+
+        bytes += generator.text('Message', styles: const PosStyles(align: PosAlign.center));
+        bytes += generator.emptyLines(1);
+        bytes += generator.text(widget.gameName, styles: const PosStyles(align: PosAlign.left, height: PosTextSize.size2)); 
+
+        for(String line in (data['text'] ?? '').toString().split('\n')) {
+          if (line.trim().isNotEmpty) {
+            bytes += generator.text(line.trim(), styles: const PosStyles(align: PosAlign.left, height: PosTextSize.size2));
           }
         }
 
-        if (targetDevice == null) return;
+        bytes += generator.emptyLines(1);
+        bytes += generator.text('Total Points: ${data['total']}.00', styles: const PosStyles(align: PosAlign.center, bold: true));
+        bytes += generator.emptyLines(1);
+        
+        bytes += generator.text('Agent : $agentName', styles: const PosStyles(align: PosAlign.center));
+        bytes += generator.text('Second Print', styles: const PosStyles(align: PosAlign.center));
 
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Connecting to ${targetDevice.name}...")));
-        await bluetooth.connect(targetDevice);
+        bytes += generator.feed(2);
+        bytes += generator.cut();
+
+        bluetooth.writeBytes(Uint8List.fromList(bytes));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Printed successfully!"), backgroundColor: Colors.green));
       }
-      
-      var userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.uid).get();
-      String agentName = "Unknown";
-      if(userDoc.exists) {
-        var uData = userDoc.data() as Map<String, dynamic>;
-        agentName = uData['name'] ?? uData['email']?.split('@')[0] ?? widget.uid.substring(0, 5);
-      }
-
-      final profile = await CapabilityProfile.load();
-      final generator = Generator(PaperSize.mm58, profile);
-      List<int> bytes = [];
-
-      bytes += generator.text('Acknowledgement Slip', styles: const PosStyles(align: PosAlign.center));
-      
-      String sessionName = data['session'] ?? 'Open';
-      bytes += generator.text('${widget.gameName} $sessionName', styles: const PosStyles(align: PosAlign.center));
-
-      var time = (data['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
-      String dateStr = DateFormat('d/M/yyyy - h:mm a').format(time);
-      bytes += generator.text('Date: $dateStr', styles: const PosStyles(align: PosAlign.center));
-      bytes += generator.emptyLines(1);
-
-      bytes += generator.text('Message', styles: const PosStyles(align: PosAlign.center));
-      bytes += generator.emptyLines(1);
-      bytes += generator.text(widget.gameName, styles: const PosStyles(align: PosAlign.left, height: PosTextSize.size2)); 
-
-      for(String line in (data['text'] ?? '').toString().split('\n')) {
-        if (line.trim().isNotEmpty) {
-          bytes += generator.text(line.trim(), styles: const PosStyles(align: PosAlign.left, height: PosTextSize.size2));
-        }
-      }
-
-      bytes += generator.emptyLines(1);
-      bytes += generator.text('Total Points: ${data['total']}.00', styles: const PosStyles(align: PosAlign.center, bold: true));
-      bytes += generator.emptyLines(1);
-      
-      bytes += generator.text('Agent : $agentName', styles: const PosStyles(align: PosAlign.center));
-      bytes += generator.text('Second Print', styles: const PosStyles(align: PosAlign.center));
-
-      bytes += generator.feed(2);
-      bytes += generator.cut();
-
-      bluetooth.writeBytes(Uint8List.fromList(bytes));
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Printed successfully!"), backgroundColor: Colors.green));
-
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Printing Failed: $e"), backgroundColor: Colors.red));
     }
   }
 
+  // --- STRICT VALIDATION FOR PANNA ---
+  bool _isValidPanna(String panna) {
+    if (panna.length != 3) return false;
+    
+    int val(String char) {
+      int v = int.tryParse(char) ?? 0;
+      return v == 0 ? 10 : v; 
+    }
+    
+    int d1 = val(panna[0]);
+    int d2 = val(panna[1]);
+    int d3 = val(panna[2]);
+    
+    return (d1 <= d2) && (d2 <= d3);
+  }
 
-  // --- UPDATED PARSING BETS LOGIC (ADDED 'fm' FAMILY LOGIC) ---
+  // --- STRICT PARSING WITH ERROR THROWING ---
   List<Map<String, dynamic>> _parseBets(String text, String session, Map<String, dynamic> userRates) {
     List<Map<String, dynamic>> finalBets = [];
+    List<String> errors = [];
     List<String> lines = text.split('\n');
     int currentAmount = 0; 
+    String? currentMode;
 
-    for (String line in lines) {
-      line = line.trim().toLowerCase();
+    for (String originalLine in lines) {
+      String line = originalLine.trim().toLowerCase();
       if (line.isEmpty) continue;
-      if (!line.contains(RegExp(r'\d'))) continue; 
 
-      String? mode;
-      if (line.contains('sp')) mode = 'sp';
-      else if (line.contains('dp')) mode = 'dp';
-      else if (line.contains('tp')) mode = 'tp';
-      else if (line.contains('fm')) mode = 'fm'; // NEW: Matka Family detection
+      // Validate strictly: do not ignore invalid characters (like letters not part of mode)
+      String textOnly = line.replaceAll(RegExp(r'[0-9\*\-\=\.\s]'), '');
+      textOnly = textOnly.replaceAll(RegExp(r'(sp|dp|tp|fm)'), '');
+      if (textOnly.trim().isNotEmpty) {
+         errors.add("ग़लत बिड फॉर्मेट (अवैध शब्द): $originalLine");
+         continue;
+      }
+
+      bool lineHasModeStr = line.contains('sp') || line.contains('dp') || line.contains('tp') || line.contains('fm');
+
+      if (!line.contains(RegExp(r'\d'))) {
+         if (!lineHasModeStr) {
+            errors.add("कोई नंबर नहीं मिला: $originalLine");
+         } else {
+            if (line.contains('sp')) currentMode = 'sp';
+            else if (line.contains('dp')) currentMode = 'dp';
+            else if (line.contains('tp')) currentMode = 'tp';
+            else if (line.contains('fm')) currentMode = 'fm';
+         }
+         continue; 
+      }
+
+      if (lineHasModeStr) {
+         if (line.contains('sp')) currentMode = 'sp';
+         else if (line.contains('dp')) currentMode = 'dp';
+         else if (line.contains('tp')) currentMode = 'tp';
+         else if (line.contains('fm')) currentMode = 'fm';
+      }
 
       String clean = line.replaceAll(RegExp(r'[^0-9]'), ' ').trim();
       List<String> parts = clean.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
 
-      if (parts.isEmpty) continue;
+      if (parts.isEmpty) {
+        errors.add("ग़लत फॉर्मेट: $originalLine");
+        continue;
+      }
 
       if (parts.length == 1) {
         int number = int.tryParse(parts[0]) ?? -1;
         if (number >= 0 && currentAmount > 0) {
-          _addParsedBet(finalBets, parts[0], currentAmount, mode, session, userRates);
+          int preCount = finalBets.length;
+          _addParsedBet(finalBets, parts[0], currentAmount, currentMode, session, userRates);
+          if (finalBets.length == preCount) {
+             errors.add("ग़लत बिड/पाना: $originalLine");
+          }
+        } else {
+          errors.add("अमाउंट नहीं डाला गया: $originalLine");
         }
       } else if (parts.length >= 2) {
         int amount = int.tryParse(parts.last) ?? 0;
         if (amount > 0) {
           currentAmount = amount; 
-          for (int i = 0; i < parts.length - 1; i++) {
-            _addParsedBet(finalBets, parts[i], currentAmount, mode, session, userRates);
+          if (!lineHasModeStr) {
+             currentMode = null; 
           }
+          for (int i = 0; i < parts.length - 1; i++) {
+            int preCount = finalBets.length;
+            _addParsedBet(finalBets, parts[i], currentAmount, currentMode, session, userRates);
+            if (finalBets.length == preCount) {
+               errors.add("ग़लत बिड/पाना: ${parts[i]}");
+            }
+          }
+        } else {
+           errors.add("अमाउंट ग़लत है: $originalLine");
         }
       }
     }
+    
+    if (errors.isNotEmpty) {
+       throw Exception("नीचे दी गई बिड ग़लत हैं, ठीक करें:\n${errors.join('\n')}");
+    }
+
     return finalBets;
   }
 
   void _addParsedBet(List<Map<String, dynamic>> bets, String numStr, int amount, String? mode, String session, Map<String, dynamic> userRates) {
+    if (numStr.length == 3 && RegExp(r'^\d+$').hasMatch(numStr)) {
+       if (!_isValidPanna(numStr)) {
+         return; 
+       }
+    }
+
+    int spRate = (userRates['spRate'] as num?)?.toInt() ?? (userRates['panelRate'] as num?)?.toInt() ?? 160;
+    int dpRate = (userRates['dpRate'] as num?)?.toInt() ?? 320;
+    int tpRate = (userRates['tpRate'] as num?)?.toInt() ?? 1000;
     
-    int pRate = (userRates['panelRate'] as num?)?.toInt() ?? 160;
-    int jRate = (userRates['jodiRate'] as num?)?.toInt() ?? 100;
+    int jRate = 100;
     int singleRate = 10;
 
-    if (mode == 'fm') {
-      // If fm (Family) is used, we expect exactly a 3-digit Panna as input (e.g. 123=fm=10)
-      if (numStr.length == 3 && int.tryParse(numStr) != null) {
-        bets.addAll(_generateFamilyBets(numStr, amount, pRate));
-      }
-    } else if (mode != null) {
+    bool generatedFromMode = false;
+
+    if (mode == 'fm' && numStr.length == 3) {
+      bets.addAll(_generateFamilyBets(numStr, amount, spRate, dpRate, tpRate));
+      generatedFromMode = true;
+    } else if (mode == 'sp' || mode == 'dp' || mode == 'tp') {
       int digit = int.tryParse(numStr) ?? -1;
       if (digit >= 0 && digit <= 9) {
-        bets.addAll(_generatePannaBets(digit, mode, amount, pRate));
+        bets.addAll(_generatePannaBets(digit, mode!, amount, spRate, dpRate, tpRate));
+        generatedFromMode = true;
       }
-    } else {
+    } 
+    
+    if (!generatedFromMode) {
       if (RegExp(r'^\d+$').hasMatch(numStr)) {
         String processedNumStr = numStr;
-        
-        // 3-digit panna hamesha ascending (badhte kram) me hona chahiye
-        if (processedNumStr.length == 3) {
-          List<String> chars = processedNumStr.split('');
-          chars.sort(); 
-          processedNumStr = chars.join('');
-        }
-
         String type = _detectBetType(processedNumStr);
 
-        // Close session mein Jodi (Double Digit) allow nahi karni hai
         if (type == 'Jodi Digit' && session == 'Close') {
           return; 
         }
 
         if (type != 'Unknown') {
-          int applyRate = type == 'Jodi Digit' ? jRate : (type.contains('Panna') ? pRate : singleRate);
+          int applyRate = singleRate;
+          if (type == 'Jodi Digit') applyRate = jRate;
+          else if (type == 'Single Panna') applyRate = spRate;
+          else if (type == 'Double Panna') applyRate = dpRate;
+          else if (type == 'Triple Panna') applyRate = tpRate;
+
           bets.add({
             'number': processedNumStr, 
             'amount': amount,
@@ -936,45 +1083,49 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     }
   }
 
-  // --- NEW: FAMILY CUT COMBINATION LOGIC ---
-  List<Map<String, dynamic>> _generateFamilyBets(String panna, int amount, int pRate) {
+  List<Map<String, dynamic>> _generateFamilyBets(String panna, int amount, int spRate, int dpRate, int tpRate) {
     Set<String> familyPannas = {};
     List<int> digits = panna.split('').map((e) => int.parse(e)).toList();
     List<int> cuts = digits.map((d) => (d + 5) % 10).toList();
 
-    // 8 Possible Combinations generated using bitwise logic (000 to 111)
     for (int i = 0; i < 8; i++) {
       int d1 = (i & 1) == 0 ? digits[0] : cuts[0];
       int d2 = (i & 2) == 0 ? digits[1] : cuts[1];
       int d3 = (i & 4) == 0 ? digits[2] : cuts[2];
 
       List<int> currentPanna = [d1, d2, d3];
-      currentPanna.sort(); // Sort inside family ensures standard valid panna
-      familyPannas.add(currentPanna.join('')); // Set automatically removes duplicates (e.g. for TP/DP)
+      currentPanna.sort(); 
+      familyPannas.add(currentPanna.join('')); 
     }
 
     return familyPannas.map((fp) {
+      String type = _detectBetType(fp);
+      int r = type == 'Single Panna' ? spRate : (type == 'Double Panna' ? dpRate : tpRate);
       return {
         'number': fp,
         'amount': amount,
-        'betType': _detectBetType(fp), // SP, DP or TP properly detected
-        'rate': pRate // In normal matka, all panels win at panel rate
+        'betType': type, 
+        'rate': r 
       };
     }).toList();
   }
 
-  List<Map<String, dynamic>> _generatePannaBets(int digit, String mode, int amount, int customPannaRate) {
+  List<Map<String, dynamic>> _generatePannaBets(int digit, String mode, int amount, int spRate, int dpRate, int tpRate) {
     List<String> pannas = [];
     String type = '';
+    int rate = spRate;
 
     if (mode == 'sp') {
       type = 'Single Panna';
+      rate = spRate;
       pannas = _getSinglePannas(digit);
     } else if (mode == 'dp') {
       type = 'Double Panna';
+      rate = dpRate;
       pannas = _getDoublePannas(digit);
     } else if (mode == 'tp') {
       type = 'Triple Panna';
+      rate = tpRate;
       pannas = ["$digit$digit$digit"]; 
     }
 
@@ -982,7 +1133,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
       'number': p,
       'amount': amount,
       'betType': type,
-      'rate': customPannaRate
+      'rate': rate
     }).toList();
   }
 
@@ -992,7 +1143,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
       for (int j=i+1; j<=9; j++) {
         for (int k=j+1; k<=9; k++) {
           int sum = (i+j+k)%10;
-          if (sum == (digit == 0 ? 0 : digit)) sps.add("$i$j$k");
+          if (sum == (digit == 0 ? digit : 0)) sps.add("$i$j$k");
         }
       }
     }
@@ -1005,7 +1156,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
       for (int j=0; j<=9; j++) {
         if (i == j) continue; 
         int sum = (i+i+j)%10;
-        if (sum == (digit == 0 ? 0 : digit)) {
+        if (sum == (digit == 0 ? digit : 0)) {
            List<int> sorted = [i, i, j]..sort();
            String p = sorted.join();
            if (!dps.contains(p)) dps.add(p);
@@ -1029,6 +1180,8 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    bool isToday = _selectedDate.year == DateTime.now().year && _selectedDate.month == DateTime.now().month && _selectedDate.day == DateTime.now().day;
+
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('games').doc(widget.gameId).snapshots(),
       builder: (context, gameSnapshot) {
@@ -1058,22 +1211,24 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
            }
         }
 
+        bool canBet = isMarketOpen && isToday;
+
         return Scaffold(
           backgroundColor: kWABg,
           appBar: AppBar(
-            backgroundColor: const Color(0xFF1F2C34),
+            backgroundColor: Colors.white,
             leadingWidth: 70,
             leading: InkWell(
               onTap: () => Navigator.pop(context),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.arrow_back, color: Colors.white),
+                  const Icon(Icons.arrow_back, color: kTextMain),
                   const SizedBox(width: 5),
                   CircleAvatar(
-                    backgroundColor: kPrimary,
+                    backgroundColor: kPrimary.withOpacity(0.1),
                     radius: 18,
-                    child: Text(titleName.isNotEmpty ? titleName[0] : 'G', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                    child: Text(titleName.isNotEmpty ? titleName[0] : 'G', style: const TextStyle(color: kPrimary, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -1081,30 +1236,23 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(titleName, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(titleName, style: const TextStyle(color: kTextMain, fontSize: 16, fontWeight: FontWeight.bold)),
                 Row(
                   children: [
                     Text(
                       sessionDisplay == 'Closed' ? 'Closed' : (sessionDisplay == 'Open' ? widget.t('open') : widget.t('close')), 
                       style: TextStyle(color: isMarketOpen ? kPrimary : kAccent, fontSize: 13, fontWeight: FontWeight.bold)
                     ),
-                    if (_selectedDate != null) ...[
-                       const SizedBox(width: 8),
-                       Text(
-                         "(${DateFormat('dd MMM').format(_selectedDate!)})",
-                         style: const TextStyle(color: Colors.grey, fontSize: 11)
-                       )
-                    ]
+                    const SizedBox(width: 8),
+                    Text(
+                      "(${DateFormat('dd MMM').format(_selectedDate)})",
+                      style: const TextStyle(color: kTextSub, fontSize: 11)
+                    )
                   ],
                 ),
               ],
             ),
             actions: [
-              if (_selectedDate != null)
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.grey),
-                  onPressed: () => setState(() => _selectedDate = null),
-                ),
               IconButton(
                 icon: const Icon(Icons.calendar_month, color: kPrimary),
                 onPressed: _pickDate,
@@ -1133,19 +1281,27 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                        return dt2.compareTo(dt1); 
                     });
                     
-                    if (_selectedDate != null) {
-                      docs = docs.where((doc) {
-                        Timestamp? ts = (doc.data() as Map<String, dynamic>)['timestamp'];
-                        if (ts == null) return false;
-                        DateTime dt = ts.toDate();
-                        return dt.year == _selectedDate!.year && 
-                               dt.month == _selectedDate!.month && 
-                               dt.day == _selectedDate!.day;
-                      }).toList();
-                    }
+                    // Always strictly filter to _selectedDate
+                    docs = docs.where((doc) {
+                      Timestamp? ts = (doc.data() as Map<String, dynamic>)['timestamp'];
+                      if (ts == null) return false;
+                      DateTime dt = ts.toDate();
+                      return dt.year == _selectedDate.year && 
+                             dt.month == _selectedDate.month && 
+                             dt.day == _selectedDate.day;
+                    }).toList();
 
                     if (docs.isEmpty) {
-                       return const Center(child: Text("कोणताही इतिहास सापडला नाही\n(No history found)", textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)));
+                       return Center(
+                         child: Column(
+                           mainAxisAlignment: MainAxisAlignment.center,
+                           children: [
+                             const Icon(Icons.history_toggle_off, color: Colors.black26, size: 50),
+                             const SizedBox(height: 10),
+                             Text("इस दिन की कोई हिस्ट्री नहीं है\n(No history found for ${DateFormat('dd MMM').format(_selectedDate)})", textAlign: TextAlign.center, style: const TextStyle(color: Colors.black54)),
+                           ],
+                         )
+                       );
                     }
 
                     return ListView.builder(
@@ -1166,6 +1322,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                               onLongPress: () => _showOptions(data),
                               child: Card(
                                 color: kWABubbleSelf,
+                                elevation: 1,
                                 shape: const RoundedRectangleBorder(borderRadius: BorderRadius.only(topLeft: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10))),
                                 margin: const EdgeInsets.only(bottom: 8),
                                 child: Padding(
@@ -1173,15 +1330,15 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
-                                      Text(data['text'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 16)),
+                                      Text(data['text'] ?? '', style: const TextStyle(color: kTextMain, fontSize: 16)),
                                       const SizedBox(height: 5),
-                                      const Divider(color: Colors.white24, height: 10),
+                                      const Divider(color: Colors.black12, height: 10),
                                       Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Text("Done | Game Amt- ${data['total']}.00", style: const TextStyle(color: Color(0xFFCE93D8), fontSize: 13)), 
+                                          Text("Done | Game Amt- ${data['total']}.00", style: const TextStyle(color: kPurpleLedger, fontSize: 13, fontWeight: FontWeight.bold)), 
                                           const SizedBox(width: 8),
-                                          Text("$dateStr $timeStr", style: const TextStyle(color: Colors.white60, fontSize: 10)),
+                                          Text("$dateStr $timeStr", style: const TextStyle(color: kTextSub, fontSize: 10)),
                                         ],
                                       )
                                     ],
@@ -1205,7 +1362,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                   children: [
                     Expanded(
                       child: Container(
-                        decoration: BoxDecoration(color: kWAInputBg, borderRadius: BorderRadius.circular(25)),
+                        decoration: BoxDecoration(color: kWAInputBg, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4)]),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
@@ -1213,13 +1370,13 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                             Expanded(
                               child: TextField(
                                 controller: _inputCtrl,
-                                enabled: isMarketOpen && !_isLoading,
+                                enabled: canBet && !_isLoading,
                                 minLines: 1,
                                 maxLines: 5,
-                                style: const TextStyle(color: Colors.white),
+                                style: const TextStyle(color: kTextMain),
                                 decoration: InputDecoration(
-                                  hintText: isMarketOpen ? widget.t('type_hint') : "Betting Closed",
-                                  hintStyle: const TextStyle(color: Colors.grey),
+                                  hintText: !isToday ? "पुरानी तारीख में बिड संभव नहीं" : (isMarketOpen ? widget.t('type_hint') : "मार्केट बंद है (Market Closed)"),
+                                  hintStyle: TextStyle(color: canBet ? kTextSub : kAccent),
                                   border: InputBorder.none,
                                   contentPadding: const EdgeInsets.symmetric(vertical: 12),
                                 ),
@@ -1232,13 +1389,13 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                     ),
                     const SizedBox(width: 6),
                     GestureDetector(
-                      onTap: (isMarketOpen && !_isLoading) ? () => _sendMessageAndPlaceBet(sessionDisplay, isMarketOpen) : null,
+                      onTap: (canBet && !_isLoading) ? () => _sendMessageAndPlaceBet(sessionDisplay, isMarketOpen) : null,
                       child: AnimatedScale(
                         scale: _sendButtonScale,
                         duration: const Duration(milliseconds: 150),
                         child: CircleAvatar(
                           radius: 24,
-                          backgroundColor: isMarketOpen ? kWAFab : Colors.grey,
+                          backgroundColor: canBet ? kWAFab : Colors.grey.shade400,
                           child: _isLoading 
                               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) 
                               : const Icon(Icons.send, color: Colors.white),
@@ -1290,7 +1447,7 @@ class LedgerTab extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
           decoration: BoxDecoration(
-            color: kCardColor,
+            color: Colors.white,
             border: Border(bottom: BorderSide(color: Colors.grey.withOpacity(0.2))),
           ),
           width: double.infinity,
@@ -1307,7 +1464,7 @@ class LedgerTab extends StatelessWidget {
               if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: kPrimary));
               
               if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                 return Center(child: Text(t('error'), style: const TextStyle(color: kTextGrey)));
+                 return Center(child: Text(t('error'), style: const TextStyle(color: kTextSub)));
               }
 
               return GridView.builder(
@@ -1322,7 +1479,7 @@ class LedgerTab extends StatelessWidget {
                 itemBuilder: (context, index) {
                   var doc = snapshot.data!.docs[index];
                   var data = doc.data() as Map<String, dynamic>;
-                  String gameName = data['name'];
+                  String gameName = data['name'] ?? '';
                   String hindiName = _getHindiName(gameName);
                   
                   return GestureDetector(
@@ -1333,8 +1490,9 @@ class LedgerTab extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: Colors.white, 
                         borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade200),
                         boxShadow: [
-                          BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2))
+                          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))
                         ],
                       ),
                       child: Column(
@@ -1343,7 +1501,7 @@ class LedgerTab extends StatelessWidget {
                           Text(
                             gameName,
                             textAlign: TextAlign.center,
-                            style: const TextStyle(color: Color(0xFF311B92), fontSize: 16, fontWeight: FontWeight.bold), 
+                            style: const TextStyle(color: Color(0xFF1976D2), fontSize: 16, fontWeight: FontWeight.bold), 
                           ),
                           if (hindiName.isNotEmpty) ...[
                             const SizedBox(height: 4),
@@ -1366,8 +1524,8 @@ class LedgerTab extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           width: double.infinity,
           decoration: const BoxDecoration(
-            color: kCardColor,
-            border: Border(top: BorderSide(color: Colors.white12))
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Colors.black12))
           ),
           child: ElevatedButton.icon(
             onPressed: () {
@@ -1375,7 +1533,7 @@ class LedgerTab extends StatelessWidget {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: kPrimary,
-              foregroundColor: Colors.black,
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 15),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
             ),
@@ -1389,12 +1547,117 @@ class LedgerTab extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// 4. DAY SLIP SCREEN 
+// 4. DAY SLIP SCREEN (WITH PDF PRINTING)
 // -----------------------------------------------------------------------------
 class DaySlipScreen extends StatelessWidget {
   final String uid;
   final Function(String) t;
   const DaySlipScreen({super.key, required this.uid, required this.t});
+
+  Future<void> _generateAndPrintPDF(
+    BuildContext context, 
+    Map<String, Map<String, double>> gameStats, 
+    double totalDhanda, 
+    double totalPayment, 
+    double commission, 
+    double baki, 
+    double maagilJama, 
+    double ekunBaki
+  ) async {
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Center(child: pw.Text("OFFICIAL RECEIPT", style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold))),
+              pw.SizedBox(height: 20),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text("Date: ${DateFormat('dd-MM-yyyy').format(DateTime.now())}"),
+                  pw.Text("ID: ...${uid.substring(0, 5)}"),
+                ],
+              ),
+              pw.Divider(),
+              pw.SizedBox(height: 10),
+              
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Expanded(flex: 2, child: pw.Text("Game", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                  pw.Expanded(flex: 1, child: pw.Text("Dhanda", textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                  pw.Expanded(flex: 1, child: pw.Text("Payment", textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                ],
+              ),
+              pw.Divider(),
+
+              ...gameStats.entries.map((e) {
+                return pw.Padding(
+                  padding: const pw.EdgeInsets.symmetric(vertical: 4.0),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Expanded(flex: 2, child: pw.Text(e.key)),
+                      pw.Expanded(flex: 1, child: pw.Text(e.value['dhanda']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(color: PdfColors.green))),
+                      pw.Expanded(flex: 1, child: pw.Text(e.value['payment']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(color: PdfColors.red))),
+                    ],
+                  ),
+                );
+              }).toList(),
+              
+              pw.Divider(),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Expanded(flex: 2, child: pw.Text("Total", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                  pw.Expanded(flex: 1, child: pw.Text(totalDhanda.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                  pw.Expanded(flex: 1, child: pw.Text(totalPayment.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                ]
+              ),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Expanded(flex: 2, child: pw.Text("Commission")),
+                  pw.Expanded(flex: 1, child: pw.Text(commission.toStringAsFixed(2), textAlign: pw.TextAlign.right)),
+                  pw.Expanded(flex: 1, child: pw.SizedBox()),
+                ]
+              ),
+              pw.Divider(),
+              
+              pw.Container(
+                color: PdfColors.purple,
+                padding: const pw.EdgeInsets.all(10),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text("BAKI", style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold)),
+                    pw.Text(baki.toStringAsFixed(2), style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold)),
+                  ]
+                )
+              ),
+              pw.SizedBox(height: 10),
+              
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("Previous Balance"), pw.Text(maagilJama.toStringAsFixed(2))]),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("Today Balance"), pw.Text(baki.toStringAsFixed(2))]),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("Total Balance", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)), pw.Text(ekunBaki.toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold))]),
+              
+              pw.SizedBox(height: 30),
+              pw.Center(child: pw.Text("* Thank you for playing *", style: const pw.TextStyle(color: PdfColors.grey))),
+            ],
+          );
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name: 'User_Day_Slip_${DateFormat('dd-MM-yyyy').format(DateTime.now())}.pdf',
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1425,7 +1688,9 @@ class DaySlipScreen extends StatelessWidget {
               final now = DateTime.now();
               final todayStart = DateTime(now.year, now.month, now.day);
               final todayDocs = docs.where((doc) {
-                 Timestamp ts = doc['timestamp'];
+                 var data = doc.data() as Map<String, dynamic>;
+                 Timestamp? ts = data['timestamp'];
+                 if (ts == null) return false;
                  return ts.toDate().isAfter(todayStart);
               }).toList();
 
@@ -1542,13 +1807,9 @@ class DaySlipScreen extends StatelessWidget {
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-                        icon: const Icon(Icons.download),
+                        icon: const Icon(Icons.picture_as_pdf),
                         label: Text(t('download_pdf')),
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Downloading PDF..."), backgroundColor: Colors.green)
-                          );
-                        },
+                        onPressed: () => _generateAndPrintPDF(context, gameStats, totalDhanda, totalPayment, commission, baki, maagilJama, ekunBaki),
                       ),
                     )
                   ],
@@ -1618,9 +1879,9 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
         return Theme(
           data: ThemeData.light().copyWith(
             colorScheme: const ColorScheme.light(
-              primary: Colors.black, 
+              primary: kPrimary, 
               onPrimary: Colors.white, 
-              onSurface: Colors.black, 
+              surface: Colors.white, 
             ),
           ),
           child: child!,
@@ -1681,10 +1942,10 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text(headerName, style: const TextStyle(color: Colors.teal, fontSize: 18, fontWeight: FontWeight.bold)),
+                Text(headerName, style: const TextStyle(color: kPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
                 Text(
                   _selectedDate != null ? DateFormat('dd MMM yyyy').format(_selectedDate!) : headerSub,
-                  style: const TextStyle(color: Colors.teal, fontSize: 14)
+                  style: const TextStyle(color: kTextSub, fontSize: 14)
                 ),
               ],
             ),
@@ -1716,7 +1977,8 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
               
               if (_selectedDate != null) {
                 docs = docs.where((doc) {
-                  Timestamp? ts = doc['timestamp'];
+                  var data = doc.data() as Map<String, dynamic>;
+                  Timestamp? ts = data['timestamp'];
                   if (ts == null) return false;
                   DateTime dt = ts.toDate();
                   return dt.year == _selectedDate!.year && dt.month == _selectedDate!.month && dt.day == _selectedDate!.day;
@@ -1724,7 +1986,8 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
               } else {
                 final now = DateTime.now();
                 docs = docs.where((doc) {
-                  Timestamp? ts = doc['timestamp'];
+                  var data = doc.data() as Map<String, dynamic>;
+                  Timestamp? ts = data['timestamp'];
                   if (ts == null) return false;
                   DateTime dt = ts.toDate();
                   return dt.year == now.year && dt.month == now.month && dt.day == now.day;
@@ -1751,16 +2014,14 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
                   closeDhanda += amount;
                 }
 
-                if (winAmt > 0) {
-                  if (type.contains('Single Digit')) {
-                    if (session == 'Open') { openSinglePay += winAmt; openSingleBet += amount; }
-                    else { closeSinglePay += winAmt; closeSingleBet += amount; }
-                  } else if (type.contains('Panna')) {
-                    if (session == 'Open') { openPannaPay += winAmt; openPannaBet += amount; }
-                    else { closePannaPay += winAmt; closePannaBet += amount; }
-                  } else if (type.contains('Jodi')) {
-                    jodiPay += winAmt; jodiBet += amount;
-                  }
+                if (type.contains('Single Digit')) {
+                  if (session == 'Open') { openSingleBet += amount; openSinglePay += winAmt; }
+                  else { closeSingleBet += amount; closeSinglePay += winAmt; }
+                } else if (type.contains('Panna')) {
+                  if (session == 'Open') { openPannaBet += amount; openPannaPay += winAmt; }
+                  else { closePannaBet += amount; closePannaPay += winAmt; }
+                } else if (type.contains('Jodi')) {
+                  jodiBet += amount; jodiPay += winAmt;
                 }
               }
 
@@ -1846,15 +2107,52 @@ class _ChatTabState extends State<ChatTab> {
           return ListView.builder(reverse: true, itemCount: snapshot.data!.docs.length, itemBuilder: (context, index) {
             var data = snapshot.data!.docs[index].data() as Map;
             bool isMe = data['sender'] == 'user';
-            return Align(alignment: isMe ? Alignment.centerRight : Alignment.centerLeft, child: Container(margin: const EdgeInsets.all(8), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: isMe ? const Color(0xFF005D4B) : const Color(0xFF2A3942), borderRadius: BorderRadius.circular(10)), child: Text(data['text'] ?? '', style: const TextStyle(color: Colors.white))));
+            return Align(
+              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft, 
+              child: Container(
+                margin: const EdgeInsets.all(8), 
+                padding: const EdgeInsets.all(12), 
+                decoration: BoxDecoration(
+                  color: isMe ? kWABubbleSelf : Colors.white, 
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4)]
+                ), 
+                child: Text(data['text'] ?? '', style: const TextStyle(color: kTextMain))
+              )
+            );
           });
         },
       )),
-      Padding(padding: const EdgeInsets.all(8), child: Row(children: [Expanded(child: TextField(controller: _msgController, style: const TextStyle(color: Colors.white), decoration: InputDecoration(filled: true, fillColor: const Color(0xFF2A3942), border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none), hintText: widget.t('type_msg'), hintStyle: const TextStyle(color: Colors.grey)))), const SizedBox(width: 8), CircleAvatar(backgroundColor: kPrimary, child: IconButton(icon: const Icon(Icons.send, color: Colors.black), onPressed: _sendMessage))]))
+      Padding(
+        padding: const EdgeInsets.all(8), 
+        child: Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _msgController, 
+              style: const TextStyle(color: kTextMain), 
+              decoration: InputDecoration(
+                filled: true, 
+                fillColor: Colors.white, 
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none), 
+                hintText: widget.t('type_msg'), 
+                hintStyle: const TextStyle(color: kTextSub)
+              )
+            )
+          ), 
+          const SizedBox(width: 8), 
+          CircleAvatar(
+            backgroundColor: kPrimary, 
+            child: IconButton(icon: const Icon(Icons.send, color: Colors.white), onPressed: _sendMessage)
+          )
+        ])
+      )
     ]);
   }
 }
 
+// -----------------------------------------------------------------------------
+// PROFILE TAB (WITH PRINTER SETTINGS ADDED)
+// -----------------------------------------------------------------------------
 class ProfileTab extends StatelessWidget {
   final String uid;
   final Function(String) t;
@@ -1862,7 +2160,41 @@ class ProfileTab extends StatelessWidget {
 
   void _showChangePasswordDialog(BuildContext context) {
     final passCtrl = TextEditingController();
-    showDialog(context: context, builder: (ctx) => AlertDialog(backgroundColor: kCardColor, title: Text(t('change_pass'), style: const TextStyle(color: Colors.white)), content: TextField(controller: passCtrl, style: const TextStyle(color: Colors.white), decoration: InputDecoration(labelText: t('new_pass'), labelStyle: const TextStyle(color: Colors.grey))), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('cancel'))), ElevatedButton(onPressed: () async { if (passCtrl.text.length < 6) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('pass_short')))); return; } try { await FirebaseAuth.instance.currentUser?.updatePassword(passCtrl.text); Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('pass_updated')), backgroundColor: kSuccess)); await FirebaseAuth.instance.signOut(); } catch (e) { Navigator.pop(ctx); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${t('error')}: $e"), backgroundColor: Colors.red)); } }, style: ElevatedButton.styleFrom(backgroundColor: kPrimary, foregroundColor: Colors.black), child: Text(t('update')))]));
+    showDialog(
+      context: context, 
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white, 
+        title: Text(t('change_pass'), style: const TextStyle(color: kTextMain)), 
+        content: TextField(
+          controller: passCtrl, 
+          style: const TextStyle(color: kTextMain), 
+          decoration: InputDecoration(labelText: t('new_pass'), labelStyle: const TextStyle(color: kTextSub))
+        ), 
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(t('cancel'), style: const TextStyle(color: kTextSub))), 
+          ElevatedButton(
+            onPressed: () async { 
+              if (passCtrl.text.length < 6) { ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('pass_short')))); return; } 
+              try { 
+                await FirebaseAuth.instance.currentUser?.updatePassword(passCtrl.text); 
+                Navigator.pop(ctx); 
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t('pass_updated')), backgroundColor: kSuccess)); 
+                await FirebaseAuth.instance.signOut(); 
+              } catch (e) { 
+                Navigator.pop(ctx); 
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("${t('error')}: $e"), backgroundColor: Colors.red)); 
+              } 
+            }, 
+            style: ElevatedButton.styleFrom(backgroundColor: kPrimary, foregroundColor: Colors.white), 
+            child: Text(t('update'))
+          )
+        ]
+      )
+    );
+  }
+
+  void _showPrinterSettingsDialog(BuildContext context) {
+    showDialog(context: context, builder: (ctx) => const PrinterSettingsDialog());
   }
 
   @override
@@ -1872,8 +2204,229 @@ class ProfileTab extends StatelessWidget {
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: kPrimary));
         var data = snapshot.data!.data() as Map<String, dynamic>;
-        return SingleChildScrollView(padding: const EdgeInsets.all(20), child: Column(children: [const CircleAvatar(radius: 50, backgroundColor: kCardColor, child: Icon(Icons.person, size: 60, color: kPrimary)), const SizedBox(height: 20), Text(data['email'] ?? "User", style: const TextStyle(color: Colors.black, fontSize: 22, fontWeight: FontWeight.bold)), const SizedBox(height: 10), Container(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), decoration: BoxDecoration(color: kCardColor, borderRadius: BorderRadius.circular(10), border: Border.all(color: kPrimary)), child: Text("${t('wallet')}: ₹ ${data['balance']}", style: const TextStyle(color: kPrimary, fontSize: 20, fontWeight: FontWeight.bold))), const SizedBox(height: 30), ListTile(tileColor: kCardColor, leading: const Icon(Icons.lock, color: Colors.white), title: Text(t('change_pass'), style: const TextStyle(color: Colors.white)), trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey), onTap: () => _showChangePasswordDialog(context)), const SizedBox(height: 10), ListTile(tileColor: kCardColor, leading: const Icon(Icons.logout, color: Colors.redAccent), title: Text(t('logout'), style: const TextStyle(color: Colors.redAccent)), onTap: () => FirebaseAuth.instance.signOut())]));
+        
+        int limit = data['limit'] ?? data['creditLimit'] ?? 0;
+        bool showLimit = data['showLimitToUser'] ?? true;
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(20), 
+          child: Column(
+            children: [
+              CircleAvatar(radius: 50, backgroundColor: kPrimary.withOpacity(0.1), child: const Icon(Icons.person, size: 60, color: kPrimary)), 
+              const SizedBox(height: 20), 
+              Text(data['email'] ?? "User", style: const TextStyle(color: kTextMain, fontSize: 22, fontWeight: FontWeight.bold)), 
+              const SizedBox(height: 10), 
+              Container(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade300)), child: Text(showLimit ? "Limit: ₹ $limit" : "Limit: ---", style: const TextStyle(color: kPrimary, fontSize: 20, fontWeight: FontWeight.bold))), 
+              const SizedBox(height: 30), 
+
+              // NOTIFICATIONS SECTION
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('notifications').orderBy('timestamp', descending: true).snapshots(),
+                builder: (context, notifSnap) {
+                  if (!notifSnap.hasData || notifSnap.data!.docs.isEmpty) return const SizedBox();
+                  
+                  List<Widget> notifWidgets = [];
+                  for (var doc in notifSnap.data!.docs) {
+                    var nData = doc.data() as Map<String, dynamic>;
+                    Timestamp? exp = nData['expiresAt'];
+                    
+                    if (exp != null && exp.toDate().isBefore(DateTime.now())) {
+                       continue; 
+                    }
+
+                    String msg = nData['message'] ?? '';
+                    Timestamp? ts = nData['timestamp'];
+                    String dateStr = ts != null ? DateFormat('dd MMM, hh:mm a').format(ts.toDate()) : '';
+
+                    notifWidgets.add(
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white, 
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.grey.shade300)
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.notifications_active, color: kPrimary, size: 20),
+                                const SizedBox(width: 8),
+                                const Text("नवीन सूचना (Notification)", style: TextStyle(fontWeight: FontWeight.bold, color: kPrimary)),
+                                const Spacer(),
+                                Text(dateStr, style: const TextStyle(fontSize: 10, color: kTextSub)),
+                              ],
+                            ),
+                            const Divider(color: Colors.black12),
+                            Text(msg, style: const TextStyle(color: kTextMain, fontSize: 14)),
+                          ]
+                        )
+                      )
+                    );
+                  }
+
+                  if (notifWidgets.isEmpty) return const SizedBox();
+
+                  return Column(
+                    children: [
+                      ...notifWidgets,
+                      const SizedBox(height: 10),
+                      const Divider(color: Colors.black12),
+                      const SizedBox(height: 10),
+                    ]
+                  );
+                }
+              ),
+
+              ListTile(tileColor: Colors.white, leading: const Icon(Icons.print, color: kPrimary), title: const Text('Printer Settings (प्रिंटर सेटिंग)', style: TextStyle(color: kTextMain)), trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: kTextSub), onTap: () => _showPrinterSettingsDialog(context)),
+              const SizedBox(height: 10),
+              ListTile(tileColor: Colors.white, leading: const Icon(Icons.lock, color: kPrimary), title: Text(t('change_pass'), style: const TextStyle(color: kTextMain)), trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: kTextSub), onTap: () => _showChangePasswordDialog(context)), 
+              const SizedBox(height: 10), 
+              ListTile(tileColor: Colors.white, leading: const Icon(Icons.logout, color: kAccent), title: Text(t('logout'), style: const TextStyle(color: kAccent)), trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: kTextSub), onTap: () => FirebaseAuth.instance.signOut())
+            ]
+          )
+        );
       },
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// PRINTER SETTINGS DIALOG (MANAGE & TEST PRINTER)
+// -----------------------------------------------------------------------------
+class PrinterSettingsDialog extends StatefulWidget {
+  const PrinterSettingsDialog({super.key});
+  @override
+  State<PrinterSettingsDialog> createState() => _PrinterSettingsDialogState();
+}
+
+class _PrinterSettingsDialogState extends State<PrinterSettingsDialog> {
+  BlueThermalPrinter bluetooth = BlueThermalPrinter.instance;
+  List<BluetoothDevice> _devices = [];
+  BluetoothDevice? _selectedDevice;
+  bool _connected = false;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _initBluetooth();
+  }
+
+  Future<void> _initBluetooth() async {
+    await Permission.bluetoothConnect.request();
+    await Permission.bluetoothScan.request();
+    
+    bool? isConnected = await bluetooth.isConnected;
+    List<BluetoothDevice> devices = [];
+    try {
+      devices = await bluetooth.getBondedDevices();
+    } on PlatformException {
+      // ignore
+    }
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? savedAddress = prefs.getString('printer_address');
+
+    if (savedAddress != null && devices.isNotEmpty) {
+      try {
+        _selectedDevice = devices.firstWhere((d) => d.address == savedAddress);
+      } catch (e) {
+        _selectedDevice = null;
+      }
+    }
+
+    setState(() {
+      _devices = devices;
+      _connected = isConnected ?? false;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _connect() async {
+    if (_selectedDevice == null) return;
+    setState(() => _isLoading = true);
+    try {
+      await bluetooth.connect(_selectedDevice!);
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setString('printer_address', _selectedDevice!.address!);
+      setState(() => _connected = true);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connected & Saved successfully!'), backgroundColor: Colors.green));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Connection error: $e'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _disconnect() async {
+    await bluetooth.disconnect();
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove('printer_address');
+    setState(() => _connected = false);
+  }
+
+  Future<void> _testPrint() async {
+    if (_connected) {
+      bluetooth.printCustom("TEST PRINT SUCCESSFUL", 1, 1);
+      bluetooth.printNewLine();
+      bluetooth.printCustom("MATKAWALA SYSTEM", 0, 1);
+      bluetooth.printNewLine();
+      bluetooth.printNewLine();
+      bluetooth.paperCut();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Connect a printer first!')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      title: const Text('Printer Settings', style: TextStyle(color: kTextMain, fontWeight: FontWeight.bold)),
+      content: _isLoading 
+        ? const SizedBox(height: 100, child: Center(child: CircularProgressIndicator(color: kPrimary)))
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButton<BluetoothDevice>(
+                dropdownColor: Colors.white,
+                hint: const Text('Select Printer', style: TextStyle(color: kTextSub)),
+                value: _selectedDevice,
+                isExpanded: true,
+                items: _devices.map((device) {
+                  return DropdownMenuItem(
+                    value: device,
+                    child: Text(device.name ?? 'Unknown', style: const TextStyle(color: kTextMain)),
+                  );
+                }).toList(),
+                onChanged: (device) {
+                  setState(() => _selectedDevice = device);
+                },
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: _connected ? Colors.red : Colors.green),
+                    onPressed: _connected ? _disconnect : _connect,
+                    child: Text(_connected ? 'Disconnect' : 'Connect', style: const TextStyle(color: Colors.white)),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+                    onPressed: _testPrint,
+                    child: const Text('Test Print', style: TextStyle(color: Colors.white)),
+                  ),
+                ],
+              )
+            ],
+          ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close', style: TextStyle(color: kTextSub)))
+      ],
     );
   }
 }

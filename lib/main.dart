@@ -77,19 +77,19 @@ class AuthWrapper extends StatelessWidget {
             final String role = userData['role'] ?? 'user';
             final bool isApproved = userData['approved'] ?? false;
 
-            // --- ROUTING LOGIC ---
+            // --- ROUTING LOGIC WITH POPSCOPE TO PREVENT ACCIDENTAL EXIT ---
             
             if (role == 'superadmin') {
-              return const SuperAdminDashboard();
+              return const PopScope(canPop: false, child: SuperAdminDashboard());
             }
             
             if (role == 'admin') {
-              return const AdminDashboard();
+              return const PopScope(canPop: false, child: AdminDashboard());
             }
 
             if (role == 'user') {
               if (isApproved) {
-                return const UserDashboard();
+                return const PopScope(canPop: false, child: UserDashboard());
               } else {
                 return const PendingApprovalScreen();
               }
@@ -141,7 +141,7 @@ class PendingApprovalScreen extends StatelessWidget {
   }
 }
 
-// --- LOGIN PAGE (NO SIGNUP) ---
+// --- LOGIN PAGE (USERNAME BASED) ---
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -150,25 +150,29 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _emailController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
 
   Future<void> _handleLogin() async {
-    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
-      _showError('Enter Email & Password');
+    if (_usernameController.text.isEmpty || _passwordController.text.isEmpty) {
+      _showError('कृपया युजरनेम आणि पासवर्ड टाका (Enter Username & Password)');
       return;
     }
 
     setState(() => _isLoading = true);
     try {
+      // Username logic - Appends dummy domain if not present, making it a background email
+      String input = _usernameController.text.trim().toLowerCase().replaceAll(' ', '');
+      String loginEmail = input.contains('@') ? input : '$input@matkawala.com';
+
       await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: _emailController.text.trim(),
+        email: loginEmail,
         password: _passwordController.text.trim(),
       );
     } on FirebaseAuthException catch (e) {
-      _showError(e.message ?? 'Login Failed');
+      _showError('लॉगिन अयशस्वी: युजरनेम किंवा पासवर्ड चुकीचा आहे');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -241,12 +245,12 @@ class _LoginPageState extends State<LoginPage> {
                         const SizedBox(height: 25),
                         
                         TextField(
-                          controller: _emailController,
+                          controller: _usernameController,
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
-                            labelText: 'Email',
+                            labelText: 'लॉगिन आयडी (Username)',
                             labelStyle: const TextStyle(color: Colors.white38),
-                            prefixIcon: const Icon(Icons.email, color: Colors.amber),
+                            prefixIcon: const Icon(Icons.person, color: Colors.amber),
                             filled: true,
                             fillColor: Colors.black26,
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -259,7 +263,7 @@ class _LoginPageState extends State<LoginPage> {
                           obscureText: _obscurePassword,
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
-                            labelText: 'Password',
+                            labelText: 'पासवर्ड (Password)',
                             labelStyle: const TextStyle(color: Colors.white38),
                             prefixIcon: const Icon(Icons.lock, color: Colors.amber),
                             suffixIcon: IconButton(
