@@ -100,6 +100,8 @@ class _UserDashboardState extends State<UserDashboard> {
       'total_baki': 'Ekun Baki',
       'outstanding': 'Thakbaki',
       'final_baki': 'Final Baki',
+      'vasuli': 'Vasuli (Collected)',
+      'vatap': 'Vatap (Paid Out)',
       'view_slip': 'VIEW DAY SLIP (PDF)',
       'change_pass': 'Change Password',
       'logout': 'Logout',
@@ -152,6 +154,8 @@ class _UserDashboardState extends State<UserDashboard> {
       'total_baki': 'एकूण बाकी',
       'outstanding': 'थकबाकी',
       'final_baki': 'अंतिम बाकी',
+      'vasuli': 'वसुली',
+      'vatap': 'वाटप',
       'view_slip': 'दिवसाची स्लिप पहा (PDF)',
       'change_pass': 'पासवर्ड बदला',
       'logout': 'लॉगआउट',
@@ -382,6 +386,27 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
     }
   }
 
+
+  // Parses result string like "123-45-678" and displays declared vs undeclared parts
+  Widget _buildResultDisplay(String result) {
+    List<String> parts = result.split("-");
+    String open = parts.isNotEmpty ? parts[0] : "***";
+    String jodi = parts.length > 1 ? parts[1] : "**";
+    String close = parts.length > 2 ? parts[2] : "***";
+    bool openDeclared = !open.contains("*");
+    bool jodiDeclared = !jodi.contains("*");
+    bool closeDeclared = !close.contains("*");
+    Widget segment(String val, bool declared) {
+      return Text(val, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: declared ? const Color(0xFF1A237E) : Colors.grey.shade400, letterSpacing: 1.5));
+    }
+    return Row(children: [
+      segment(open, openDeclared),
+      Text(" - ", style: TextStyle(color: Colors.grey.shade400, fontWeight: FontWeight.bold)),
+      segment(jodi, jodiDeclared),
+      Text(" - ", style: TextStyle(color: Colors.grey.shade400, fontWeight: FontWeight.bold)),
+      segment(close, closeDeclared),
+    ]);
+  }
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -486,6 +511,9 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(data['name'] ?? '', style: const TextStyle(color: kTextMain, fontWeight: FontWeight.bold, fontSize: 18, letterSpacing: 1.1)),
+                                  const SizedBox(height: 4),
+                                  // RESULT ROW — shows declared result like "258-50-235"
+                                  _buildResultDisplay(data['result'] ?? '***-**-***'),
                                   const SizedBox(height: 6),
                                   Row(
                                     children: [
@@ -730,7 +758,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     }
   }
 
-  void _showOptions(Map<String, dynamic> data) {
+  void _showOptions(Map<String, dynamic> data, bool canBet) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -739,6 +767,22 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
         return SafeArea(
           child: Wrap(
             children: [
+              if (!canBet)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  color: Colors.orange.shade50,
+                  child: Row(
+                    children: const [
+                      Icon(Icons.lock_outline, color: Colors.orange, size: 18),
+                      SizedBox(width: 8),
+                      Expanded(child: Text(
+                        'या सेशनचा वेळ संपला आहे. Edit/Delete बंद.\n(Session over — Edit/Delete locked)',
+                        style: TextStyle(color: Colors.orange, fontSize: 12)
+                      )),
+                    ],
+                  ),
+                ),
               ListTile(
                 leading: const Icon(Icons.copy, color: kTextMain),
                 title: const Text('Copy (कॉपी)', style: TextStyle(color: kTextMain)),
@@ -750,20 +794,20 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                 }
               ),
               ListTile(
-                leading: const Icon(Icons.edit, color: Colors.blue),
-                title: const Text('Edit (बदल करा)', style: TextStyle(color: kTextMain)),
-                onTap: () {
+                leading: Icon(Icons.edit, color: canBet ? Colors.blue : Colors.grey),
+                title: Text('Edit (बदल करा)', style: TextStyle(color: canBet ? kTextMain : Colors.grey)),
+                onTap: canBet ? () {
                   Navigator.pop(context);
                   _editBet(data);
-                }
+                } : null,
               ),
               ListTile(
-                leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text('Delete (हटवा)', style: TextStyle(color: kTextMain)),
-                onTap: () {
+                leading: Icon(Icons.delete, color: canBet ? Colors.red : Colors.grey),
+                title: Text('Delete (हटवा)', style: TextStyle(color: canBet ? kTextMain : Colors.grey)),
+                onTap: canBet ? () {
                   Navigator.pop(context);
                   _deleteBet(data);
-                }
+                } : null,
               ),
               ListTile(
                 leading: const Icon(Icons.print, color: Colors.green),
@@ -942,7 +986,40 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     return (d1 <= d2) && (d2 <= d3);
   }
 
+  // Returns a specific error string if numStr is a zero-start invalid number, else null
+  String? _zeroBidError(String numStr) {
+    if (!RegExp(r'^\d+$').hasMatch(numStr)) return null;
+    String type = _detectBetType(numStr);
+    if (type == 'Single Digit' && numStr == '0') {
+      return "❌ '0' सिंगल डिजिट invalid है";
+    }
+    // Jodi 00-99 tak valid hai, 0 se shuru ho sakti hai (04, 09, 00 sab valid)
+    if ((type == 'Single Panna' || type == 'Double Panna' || type == 'Triple Panna') && numStr.startsWith('0')) {
+      return "❌ Panna '0' से शुरू नहीं हो सकता: $numStr";
+    }
+    return null;
+  }
+
   // --- STRICT PARSING WITH ERROR THROWING ---
+  // Bid text display ke liye mobile numbers, dates, aur game name headers filter karo
+  String _filterDisplayText(String text) {
+    List<String> lines = text.split('\n');
+    List<String> filtered = [];
+    for (String line in lines) {
+      String trimmed = line.trim();
+      if (trimmed.isEmpty) continue;
+      // WhatsApp full header: "[3/11, 7:52 PM] Name: bids" or "[3/9, 23:45] +91 70666: bids"
+      // Bracket can contain digits, slash, comma, space, colon, letters (AM/PM)
+      if (RegExp(r'^\[.+?\]\s*[^:]+:').hasMatch(trimmed)) continue;
+      // Standalone mobile number lines (e.g. +91 70666 68122)
+      if (RegExp(r'^\+?\d[\d\s\-]{8,}$').hasMatch(trimmed)) continue;
+      // Lines that are purely letters (game name headers like "Kalyan Night Close") skip
+      if (!trimmed.contains(RegExp(r'\d'))) continue;
+      filtered.add(trimmed);
+    }
+    return filtered.join('\n');
+  }
+
   List<Map<String, dynamic>> _parseBets(String text, String session, Map<String, dynamic> userRates) {
     List<Map<String, dynamic>> finalBets = [];
     List<String> errors = [];
@@ -951,29 +1028,72 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     String? currentMode;
 
     for (String originalLine in lines) {
-      String line = originalLine.trim().toLowerCase();
+      // STEP 0: WhatsApp header lines jaise "[3/11, 7:52 PM] Bhausaheb: 33x100"
+      // WhatsApp format: "[3/11, 7:52 PM] +91 70666 68122: bids" OR "[3/9, 23:45] Name: bids"
+      String processLine = originalLine;
+      final waHeaderMatch = RegExp(r'^\[.+?\]\s*[^:]+:(.*)').firstMatch(originalLine);
+      if (waHeaderMatch != null) {
+        // Header ke baad ka part nikalo e.g. " 33x100" or " 3*50"
+        String afterColon = waHeaderMatch.group(1)?.trim() ?? '';
+        if (afterColon.isEmpty) continue; // sirf header tha, koi bid nahi
+        processLine = afterColon; // bid part ko process karo
+      } else if (RegExp(r'^\+\d{1,3}[\s\-]?\d{4,6}[\s\-]?\d{4,6}').hasMatch(originalLine.trim())) {
+        continue; // plain phone number line - skip
+      }
+
+      // FIX: Treat ALL special characters as separators (same as space)
+      String lineNormalized = processLine
+          .replaceAll(RegExp(r'[!@#\$%\^&\*,;:|\/\\~`\(\)\[\]\{\}\+\-xX]+'), ' ')
+          .trim();
+
+      String line = lineNormalized.toLowerCase();
       if (line.isEmpty) continue;
 
-      // Validate strictly: do not ignore invalid characters (like letters not part of mode)
-      String textOnly = line.replaceAll(RegExp(r'[0-9\*\-\=\.\s]'), '');
-      textOnly = textOnly.replaceAll(RegExp(r'(sp|dp|tp|fm)'), '');
-      if (textOnly.trim().isNotEmpty) {
-         errors.add("ग़लत बिड फॉर्मेट (अवैध शब्द): $originalLine");
-         continue;
+      // WhatsApp copy-paste — if line has NO digits at all, it's a name/label/header line → silently skip
+      if (!line.contains(RegExp(r'\d'))) {
+        bool lineHasModeKeyword = line.contains('sp') || line.contains('dp') || line.contains('tp') || line.contains('fm');
+        if (lineHasModeKeyword) {
+          if (line.contains('sp')) currentMode = 'sp';
+          else if (line.contains('dp')) currentMode = 'dp';
+          else if (line.contains('tp')) currentMode = 'tp';
+          else if (line.contains('fm')) currentMode = 'fm';
+        }
+        // Pure text (names like "Rahul", "Total:", date headers) → silently skip
+        continue;
       }
 
       bool lineHasModeStr = line.contains('sp') || line.contains('dp') || line.contains('tp') || line.contains('fm');
 
-      if (!line.contains(RegExp(r'\d'))) {
-         if (!lineHasModeStr) {
-            errors.add("कोई नंबर नहीं मिला: $originalLine");
-         } else {
-            if (line.contains('sp')) currentMode = 'sp';
-            else if (line.contains('dp')) currentMode = 'dp';
-            else if (line.contains('tp')) currentMode = 'tp';
-            else if (line.contains('fm')) currentMode = 'fm';
-         }
-         continue; 
+      // Remove known valid non-digit chars for mode detection, then check for unexpected letters
+      String textOnly = line.replaceAll(RegExp(r'[0-9\*\-\=\.\s\+xX]'), '');
+      textOnly = textOnly.replaceAll(RegExp(r'(sp|dp|tp|fm)'), '');
+      if (textOnly.trim().isNotEmpty) {
+        // Line has letters — could be "Kalyan Night Close 399-200 800-200" style
+        // Extract only the numeric bid portion (numbers with separators) and try to parse it
+        // Strip leading alphabetic header words, keep only numeric token groups
+        String numericPart = line.replaceAll(RegExp(r'[a-zA-Z\u0900-\u097F]+'), ' ').trim();
+        // If there are still usable digits after stripping, process that part
+        if (numericPart.replaceAll(RegExp(r'[^0-9]'), '').isNotEmpty) {
+          // Reuse same logic: treat as if this numericPart is the line
+          String cleanNumeric = numericPart.replaceAll(RegExp(r'[^0-9]'), ' ').trim();
+          List<String> numParts = cleanNumeric.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
+          if (numParts.length >= 2) {
+            int amount = int.tryParse(numParts.last) ?? 0;
+            if (amount > 0) {
+              currentAmount = amount;
+              if (!lineHasModeStr) currentMode = null;
+              for (int i = 0; i < numParts.length - 1; i++) {
+                int preCount = finalBets.length;
+                _addParsedBet(finalBets, numParts[i], currentAmount, currentMode, session, userRates);
+                if (finalBets.length == preCount) {
+                  errors.add(_zeroBidError(numParts[i]) ?? "ग़लत बिड: ${numParts[i]}");
+                }
+              }
+            }
+          }
+        }
+        // Either way, skip rest of loop for this line (already processed or pure text header)
+        continue;
       }
 
       if (lineHasModeStr) {
@@ -997,7 +1117,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
           int preCount = finalBets.length;
           _addParsedBet(finalBets, parts[0], currentAmount, currentMode, session, userRates);
           if (finalBets.length == preCount) {
-             errors.add("ग़लत बिड/पाना: $originalLine");
+             errors.add(_zeroBidError(parts[0]) ?? "ग़लत बिड/पाना: $originalLine");
           }
         } else {
           errors.add("अमाउंट नहीं डाला गया: $originalLine");
@@ -1013,7 +1133,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
             int preCount = finalBets.length;
             _addParsedBet(finalBets, parts[i], currentAmount, currentMode, session, userRates);
             if (finalBets.length == preCount) {
-               errors.add("ग़लत बिड/पाना: ${parts[i]}");
+               errors.add(_zeroBidError(parts[i]) ?? "ग़लत बिड/पाना: ${parts[i]}");
             }
           }
         } else {
@@ -1039,9 +1159,8 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     int spRate = (userRates['spRate'] as num?)?.toInt() ?? (userRates['panelRate'] as num?)?.toInt() ?? 160;
     int dpRate = (userRates['dpRate'] as num?)?.toInt() ?? 320;
     int tpRate = (userRates['tpRate'] as num?)?.toInt() ?? 1000;
-    
-    int jRate = 100;
-    int singleRate = 10;
+    int jRate = (userRates['jodiRate'] as num?)?.toInt() ?? 100;
+    int singleRate = (userRates['singleRate'] as num?)?.toInt() ?? 10;
 
     bool generatedFromMode = false;
 
@@ -1060,6 +1179,16 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
       if (RegExp(r'^\d+$').hasMatch(numStr)) {
         String processedNumStr = numStr;
         String type = _detectBetType(processedNumStr);
+
+        // 0 से शुरू या सिर्फ 0 — ERROR दो, skip नहीं
+        // Single digit "0" → invalid
+        if (type == 'Single Digit' && processedNumStr == '0') {
+          return; // caller in _parseBets will add error because preCount == finalBets.length
+        }
+        // Panna 0 से शुरू (012, 045 etc.) → INVALID (matka mein 0-start panna nahi hota)
+        if ((type == 'Single Panna' || type == 'Double Panna' || type == 'Triple Panna') && processedNumStr.startsWith('0')) {
+          return;
+        }
 
         if (type == 'Jodi Digit' && session == 'Close') {
           return; 
@@ -1093,9 +1222,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
       int d2 = (i & 2) == 0 ? digits[1] : cuts[1];
       int d3 = (i & 4) == 0 ? digits[2] : cuts[2];
 
-      List<int> currentPanna = [d1, d2, d3];
-      currentPanna.sort(); 
-      familyPannas.add(currentPanna.join('')); 
+      familyPannas.add(_matkaSortPanna([d1, d2, d3]));
     }
 
     return familyPannas.map((fp) {
@@ -1126,7 +1253,12 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     } else if (mode == 'tp') {
       type = 'Triple Panna';
       rate = tpRate;
-      pannas = ["$digit$digit$digit"]; 
+      // FIX BUG 2: digit=1 -> 777 (7+7+7=21->1), NOT 111 (sum=3)
+      int tDigit = -1;
+      for (int t = 0; t <= 9; t++) {
+        if ((t * 3) % 10 == digit) { tDigit = t; break; }
+      }
+      pannas = tDigit >= 0 ? ["$tDigit$tDigit$tDigit"] : [];
     }
 
     return pannas.map((p) => {
@@ -1137,13 +1269,20 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     }).toList();
   }
 
+  // FIX BUG 3: Matka standard - zeros at end (290 not 029, 100 not 001)
+  String _matkaSortPanna(List<int> digits) {
+    List<int> nonZero = digits.where((d) => d != 0).toList()..sort();
+    List<int> zeros = List.filled(digits.where((d) => d == 0).length, 0);
+    return (nonZero + zeros).join();
+  }
+
   List<String> _getSinglePannas(int digit) {
     List<String> sps = [];
     for (int i=0; i<=9; i++) {
       for (int j=i+1; j<=9; j++) {
         for (int k=j+1; k<=9; k++) {
           int sum = (i+j+k)%10;
-          if (sum == (digit == 0 ? digit : 0)) sps.add("$i$j$k");
+          if (sum == digit) sps.add(_matkaSortPanna([i, j, k]));
         }
       }
     }
@@ -1154,11 +1293,10 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     List<String> dps = [];
     for (int i=0; i<=9; i++) {
       for (int j=0; j<=9; j++) {
-        if (i == j) continue; 
+        if (i == j) continue;
         int sum = (i+i+j)%10;
-        if (sum == (digit == 0 ? digit : 0)) {
-           List<int> sorted = [i, i, j]..sort();
-           String p = sorted.join();
+        if (sum == digit) {
+           String p = _matkaSortPanna([i, i, j]);
            if (!dps.contains(p)) dps.add(p);
         }
       }
@@ -1212,6 +1350,23 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
         }
 
         bool canBet = isMarketOpen && isToday;
+        // Session-specific edit/delete control:
+        // openSessionActive = true means Open bets can be edited/deleted
+        // closeSessionActive = true means Close bets can be edited/deleted
+        bool openSessionActive = false;
+        bool closeSessionActive = false;
+        if (gameSnapshot.hasData && gameSnapshot.data!.exists) {
+          var gData2 = gameSnapshot.data!.data() as Map<String, dynamic>;
+          if (gData2['isClosed'] != true) {
+            DateTime now2 = DateTime.now();
+            DateTime oStart2 = _parseTime(gData2['openBetStart'] ?? '09:00 AM', now2);
+            DateTime oEnd2 = _parseTime(gData2['openBetEnd'] ?? '10:00 AM', now2);
+            DateTime cStart2 = _parseTime(gData2['closeBetStart'] ?? '12:00 PM', now2);
+            DateTime cEnd2 = _parseTime(gData2['closeBetEnd'] ?? '02:00 PM', now2);
+            openSessionActive = now2.isAfter(oStart2) && now2.isBefore(oEnd2);
+            closeSessionActive = now2.isAfter(cStart2) && now2.isBefore(cEnd2);
+          }
+        }
 
         return Scaffold(
           backgroundColor: kWABg,
@@ -1312,14 +1467,21 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                         var data = docs[index].data() as Map<String, dynamic>;
                         var time = (data['timestamp'] as Timestamp?)?.toDate();
                         String timeStr = time != null ? DateFormat('hh:mm a').format(time) : '';
-                        String dateStr = time != null ? DateFormat('dd MMM yyyy').format(time) : '';
 
                         return Align(
                           alignment: Alignment.centerRight,
                           child: ConstrainedBox(
                             constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                             child: GestureDetector(
-                              onLongPress: () => _showOptions(data),
+                              onLongPress: () {
+                                // Determine if this specific bet can be edited based on its session
+                                String betSession = (data['session'] ?? 'Open').toString();
+                                bool canEditThisBet = isToday && (
+                                  (betSession == 'Open' && openSessionActive) ||
+                                  (betSession == 'Close' && closeSessionActive)
+                                );
+                                _showOptions(data, canEditThisBet);
+                              },
                               child: Card(
                                 color: kWABubbleSelf,
                                 elevation: 1,
@@ -1330,7 +1492,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
-                                      Text(data['text'] ?? '', style: const TextStyle(color: kTextMain, fontSize: 16)),
+                                      Text(_filterDisplayText(data['text'] ?? ''), style: const TextStyle(color: kTextMain, fontSize: 16)),
                                       const SizedBox(height: 5),
                                       const Divider(color: Colors.black12, height: 10),
                                       Row(
@@ -1338,7 +1500,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                                         children: [
                                           Text("Done | Game Amt- ${data['total']}.00", style: const TextStyle(color: kPurpleLedger, fontSize: 13, fontWeight: FontWeight.bold)), 
                                           const SizedBox(width: 8),
-                                          Text("$dateStr $timeStr", style: const TextStyle(color: kTextSub, fontSize: 10)),
+                                          Text(timeStr, style: const TextStyle(color: kTextSub, fontSize: 10)),
                                         ],
                                       )
                                     ],
@@ -1547,106 +1709,156 @@ class LedgerTab extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// 4. DAY SLIP SCREEN (WITH PDF PRINTING)
+// 4. DAY SLIP SCREEN (REAL-TIME + DATE PICKER + WIN/LOSS LIVE)
 // -----------------------------------------------------------------------------
-class DaySlipScreen extends StatelessWidget {
+class DaySlipScreen extends StatefulWidget {
   final String uid;
   final Function(String) t;
   const DaySlipScreen({super.key, required this.uid, required this.t});
 
-  Future<void> _generateAndPrintPDF(
-    BuildContext context, 
-    Map<String, Map<String, double>> gameStats, 
-    double totalDhanda, 
-    double totalPayment, 
-    double commission, 
-    double baki, 
-    double maagilJama, 
-    double ekunBaki
-  ) async {
+  @override
+  State<DaySlipScreen> createState() => _DaySlipScreenState();
+}
+
+class _DaySlipScreenState extends State<DaySlipScreen> {
+  DateTime _selectedDate = DateTime.now();
+
+  String get uid => widget.uid;
+  Function(String) get t => widget.t;
+
+  Future<void> _pickDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.light().copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: kPrimary,
+              onPrimary: Colors.white,
+              surface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() => _selectedDate = picked);
+    }
+  }
+
+  // ---- PDF GENERATION ----
+  Future<void> _generateAndPrintPDF({
+    required BuildContext context,
+    required Map<String, Map<String, double>> gameStats,
+    required double totalDhanda,
+    required double totalPayment,
+    required double commission,
+    required double baki,
+    required double maagilJama,
+    required double ekunBaki,
+    required String userName,
+    required double commissionPct,
+    required double vasuli,
+    required double vatap,
+    required double antimbaki,
+  }) async {
     final pdf = pw.Document();
 
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
-        build: (pw.Context context) {
+        build: (pw.Context ctx) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Center(child: pw.Text("OFFICIAL RECEIPT", style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold))),
-              pw.SizedBox(height: 20),
+              pw.Center(child: pw.Text("MATKAWALA - OFFICIAL RECEIPT", style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold))),
+              pw.SizedBox(height: 6),
+              pw.Center(child: pw.Text(userName, style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700))),
+              pw.SizedBox(height: 16),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text("Date: ${DateFormat('dd-MM-yyyy').format(DateTime.now())}"),
+                  pw.Text("Date: ${DateFormat('dd-MM-yyyy').format(_selectedDate)}"),
                   pw.Text("ID: ...${uid.substring(0, 5)}"),
                 ],
               ),
               pw.Divider(),
-              pw.SizedBox(height: 10),
-              
+              pw.SizedBox(height: 8),
               pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Expanded(flex: 2, child: pw.Text("Game", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                  pw.Expanded(flex: 1, child: pw.Text("Dhanda", textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                  pw.Expanded(flex: 1, child: pw.Text("Payment", textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                  pw.Expanded(flex: 3, child: pw.Text("Game", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                  pw.Expanded(flex: 2, child: pw.Text("Dhanda", textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                  pw.Expanded(flex: 2, child: pw.Text("Payment", textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
                 ],
               ),
               pw.Divider(),
-
-              ...gameStats.entries.map((e) {
-                return pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(vertical: 4.0),
-                  child: pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Expanded(flex: 2, child: pw.Text(e.key)),
-                      pw.Expanded(flex: 1, child: pw.Text(e.value['dhanda']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(color: PdfColors.green))),
-                      pw.Expanded(flex: 1, child: pw.Text(e.value['payment']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(color: PdfColors.red))),
-                    ],
-                  ),
-                );
-              }).toList(),
-              
+              ...gameStats.entries.map((e) => pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(vertical: 3),
+                child: pw.Row(
+                  children: [
+                    pw.Expanded(flex: 3, child: pw.Text(e.key, style: const pw.TextStyle(fontSize: 11))),
+                    pw.Expanded(flex: 2, child: pw.Text(e.value['dhanda']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: const pw.TextStyle(fontSize: 11, color: PdfColors.green800))),
+                    pw.Expanded(flex: 2, child: pw.Text(e.value['payment']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: const pw.TextStyle(fontSize: 11, color: PdfColors.red800))),
+                  ],
+                ),
+              )).toList(),
               pw.Divider(),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Expanded(flex: 2, child: pw.Text("Total", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                  pw.Expanded(flex: 1, child: pw.Text(totalDhanda.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                  pw.Expanded(flex: 1, child: pw.Text(totalPayment.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                ]
-              ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Expanded(flex: 2, child: pw.Text("Commission")),
-                  pw.Expanded(flex: 1, child: pw.Text(commission.toStringAsFixed(2), textAlign: pw.TextAlign.right)),
-                  pw.Expanded(flex: 1, child: pw.SizedBox()),
-                ]
-              ),
-              pw.Divider(),
-              
+              pw.Row(children: [
+                pw.Expanded(flex: 3, child: pw.Text("एकूण Total", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Expanded(flex: 2, child: pw.Text(totalDhanda.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.green800))),
+                pw.Expanded(flex: 2, child: pw.Text(totalPayment.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.red800))),
+              ]),
+              pw.SizedBox(height: 4),
+              pw.Row(children: [
+                pw.Expanded(flex: 3, child: pw.Text("कमिशन (${commissionPct.toStringAsFixed(0)}%)")),
+                pw.Expanded(flex: 2, child: pw.Text(commission.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: const pw.TextStyle(color: PdfColors.green800))),
+                pw.Expanded(flex: 2, child: pw.SizedBox()),
+              ]),
+              pw.SizedBox(height: 4),
+              pw.Row(children: [
+                pw.Expanded(flex: 3, child: pw.Text("Net Dhanda", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                pw.Expanded(flex: 2, child: pw.Text((totalDhanda - commission).toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.green800))),
+                pw.Expanded(flex: 2, child: pw.Text(totalPayment.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.red800))),
+              ]),
+              pw.SizedBox(height: 12),
               pw.Container(
                 color: PdfColors.purple,
-                padding: const pw.EdgeInsets.all(10),
+                padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text("BAKI", style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold)),
-                    pw.Text(baki.toStringAsFixed(2), style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold)),
-                  ]
-                )
+                    pw.Text("बाकी BAKI", style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14)),
+                    pw.Text(baki.toStringAsFixed(2), style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14)),
+                  ],
+                ),
               ),
               pw.SizedBox(height: 10),
-              
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("Previous Balance"), pw.Text(maagilJama.toStringAsFixed(2))]),
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("Today Balance"), pw.Text(baki.toStringAsFixed(2))]),
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("Total Balance", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)), pw.Text(ekunBaki.toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold))]),
-              
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("मागील जमा (Prev Balance)"), pw.Text(maagilJama.toStringAsFixed(2))]),
+              pw.SizedBox(height: 4),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("आजचे जमा (Today Baki)"), pw.Text(baki.toStringAsFixed(2))]),
+              pw.SizedBox(height: 4),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                pw.Text("एकूण बाकी (Total)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text(ekunBaki.toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+              ]),
+              pw.SizedBox(height: 8),
+              pw.Divider(),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("थकबाकी (Outstanding)"), pw.Text(maagilJama.toStringAsFixed(2))]),
+              pw.SizedBox(height: 4),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("वसुली (Collected from Agent)"), pw.Text(vasuli.toStringAsFixed(0))]),
+              pw.SizedBox(height: 4),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("वाटप (Paid to Agent)"), pw.Text(vatap.toStringAsFixed(0))]),
+              pw.SizedBox(height: 6),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                pw.Text("अंतिम बाकी (Final Balance)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text(antimbaki.toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+              ]),
               pw.SizedBox(height: 30),
-              pw.Center(child: pw.Text("* Thank you for playing *", style: const pw.TextStyle(color: PdfColors.grey))),
+              pw.Center(child: pw.Text("* Thank you for playing *", style: const pw.TextStyle(color: PdfColors.grey, fontSize: 10))),
             ],
           );
         },
@@ -1655,173 +1867,11 @@ class DaySlipScreen extends StatelessWidget {
 
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdf.save(),
-      name: 'User_Day_Slip_${DateFormat('dd-MM-yyyy').format(DateTime.now())}.pdf',
+      name: 'DaySlip_${DateFormat('dd-MM-yyyy').format(_selectedDate)}.pdf',
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
-      builder: (context, userSnap) {
-        double maagilJama = 0.0;
-        if (userSnap.hasData && userSnap.data!.exists) {
-          maagilJama = ((userSnap.data!.data() as Map<String, dynamic>)['balance'] ?? 0).toDouble();
-        }
-
-        return Scaffold(
-          backgroundColor: Colors.white,
-          appBar: AppBar(
-            title: Text(t('official_receipt'), style: const TextStyle(color: Colors.black)),
-            backgroundColor: Colors.white,
-            elevation: 1,
-            iconTheme: const IconThemeData(color: Colors.black),
-          ),
-          body: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('bets').where('userId', isEqualTo: uid).snapshots(),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) return Center(child: Text("Error: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.black));
-              
-              var docs = snapshot.data!.docs;
-
-              final now = DateTime.now();
-              final todayStart = DateTime(now.year, now.month, now.day);
-              final todayDocs = docs.where((doc) {
-                 var data = doc.data() as Map<String, dynamic>;
-                 Timestamp? ts = data['timestamp'];
-                 if (ts == null) return false;
-                 return ts.toDate().isAfter(todayStart);
-              }).toList();
-
-              if (todayDocs.isEmpty) {
-                return const Center(child: Text("No bets found for today", style: TextStyle(color: Colors.black54, fontSize: 16)));
-              }
-
-              Map<String, Map<String, double>> gameStats = {};
-
-              for (var doc in todayDocs) {
-                var data = doc.data() as Map<String, dynamic>;
-                String game = data['gameName'] ?? 'Unknown';
-                double amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
-                double payment = 0.0;
-
-                if (data['status'] == 'won') {
-                  payment = (data['potentialWin'] as num?)?.toDouble() ?? 0.0;
-                }
-
-                if (!gameStats.containsKey(game)) {
-                  gameStats[game] = {'dhanda': 0.0, 'payment': 0.0};
-                }
-                gameStats[game]!['dhanda'] = gameStats[game]!['dhanda']! + amount;
-                gameStats[game]!['payment'] = gameStats[game]!['payment']! + payment;
-              }
-
-              double totalDhanda = 0;
-              double totalPayment = 0;
-
-              gameStats.forEach((key, value) {
-                totalDhanda += value['dhanda']!;
-                totalPayment += value['payment']!;
-              });
-
-              double commission = totalDhanda * 0.10; 
-              double netDhanda = totalDhanda - commission;
-              double baki = netDhanda - totalPayment;
-
-              double ekunBaki = maagilJama + baki;
-
-              return SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(child: Text(t('title'), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black))),
-                    Center(child: Text(t('official_receipt'), style: const TextStyle(color: Colors.grey))),
-                    const Divider(color: Colors.black),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text("${t('date')}: ${DateFormat('dd-MM-yyyy').format(DateTime.now())}", style: const TextStyle(color: Colors.black)),
-                        Text("${t('id')}: ...${uid.substring(0,5)}", style: const TextStyle(color: Colors.black)),
-                      ],
-                    ),
-                    const Divider(color: Colors.black),
-                    const SizedBox(height: 10),
-
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(flex: 2, child: Text(t('game'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 15))),
-                        Expanded(flex: 1, child: Text(t('dhanda'), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 15))),
-                        Expanded(flex: 1, child: Text(t('payment'), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 15))),
-                      ],
-                    ),
-                    const Divider(color: Colors.black),
-
-                    ...gameStats.entries.map((e) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(flex: 2, child: Text(e.key, style: const TextStyle(color: Colors.black, fontSize: 14))),
-                            Expanded(flex: 1, child: Text(e.value['dhanda']!.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.bold))),
-                            Expanded(flex: 1, child: Text(e.value['payment']!.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.bold))),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-
-                    const Divider(color: Colors.black),
-
-                    _buildCalcRow(t('total'), totalDhanda, totalPayment, isBold: true),
-                    _buildCalcRow('कमिशन (10%)', commission, null),
-                    _buildCalcRow(t('total'), netDhanda, totalPayment, isBold: true),
-
-                    const SizedBox(height: 10),
-
-                    Container(
-                      color: const Color(0xFF7B1FA2),
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 15),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(t('baki'), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                          Text(baki.toStringAsFixed(2), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 10),
-
-                    _buildFinalRow(t('prev_baki'), maagilJama, Colors.black87),
-                    _buildFinalRow(t('today_baki'), baki, Colors.black87),
-                    _buildFinalRow(t('total_baki'), ekunBaki, Colors.black87),
-                    _buildFinalRow(t('outstanding'), 0.00, Colors.black87),
-
-                    const SizedBox(height: 30),
-                    Center(child: Text(t('thank_you'), style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-                        icon: const Icon(Icons.picture_as_pdf),
-                        label: Text(t('download_pdf')),
-                        onPressed: () => _generateAndPrintPDF(context, gameStats, totalDhanda, totalPayment, commission, baki, maagilJama, ekunBaki),
-                      ),
-                    )
-                  ],
-                ),
-              );
-            },
-          ),
-        );
-      }
-    );
-  }
-
+  // ---- HELPER WIDGETS ----
   Widget _buildCalcRow(String title, double? val1, double? val2, {bool isBold = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
@@ -1830,8 +1880,10 @@ class DaySlipScreen extends StatelessWidget {
         children: [
           Expanded(flex: 2, child: Text(title, style: TextStyle(color: Colors.black, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal))),
           if (val1 != null) Expanded(flex: 1, child: Text(val1.toStringAsFixed(2), textAlign: TextAlign.right, style: TextStyle(color: Colors.green, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal))),
-          if (val2 != null) Expanded(flex: 1, child: Text(val2.toStringAsFixed(2), textAlign: TextAlign.right, style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)))
-          else Expanded(flex: 1, child: const SizedBox()),
+          if (val2 != null)
+            Expanded(flex: 1, child: Text(val2.toStringAsFixed(2), textAlign: TextAlign.right, style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)))
+          else
+            const Expanded(flex: 1, child: SizedBox()),
         ],
       ),
     );
@@ -1847,6 +1899,436 @@ class DaySlipScreen extends StatelessWidget {
           Text(value.toStringAsFixed(2), style: TextStyle(color: valColor, fontSize: 14, fontWeight: FontWeight.bold)),
         ],
       ),
+    );
+  }
+
+  // ---- MAIN BUILD ----
+  @override
+  Widget build(BuildContext context) {
+    // TRIPLE StreamBuilder:
+    // 1) User doc — name, commission%, balance (maagilJama / thakbaki)
+    // 2) Bets — real-time, filtered by _selectedDate (dhanda + payment from won bets)
+    // 3) Transactions — vasuli (collected from agent) & vatap (paid to agent) for selected date
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      builder: (context, userSnap) {
+        // --- User data ---
+        String userName = "User";
+        double thakbaki = 0.0;    // Previous outstanding balance (manually set by admin)
+        double commissionPct = 10.0;
+
+        if (userSnap.hasData && userSnap.data!.exists) {
+          final uData = userSnap.data!.data() as Map<String, dynamic>;
+          userName = uData['name'] ?? (uData['email'] as String?)?.split('@')[0] ?? 'User';
+          // 'balance' = admin ka manually maintained balance (outstanding dues)
+          thakbaki = (uData['balance'] as num?)?.toDouble() ?? 0.0;
+          if (uData.containsKey('commission')) {
+            commissionPct = (uData['commission'] as num).toDouble();
+          }
+        }
+
+        final double commissionRate = commissionPct / 100.0;
+
+        return Scaffold(
+          backgroundColor: Colors.white,
+          appBar: AppBar(
+            backgroundColor: Colors.white,
+            elevation: 1,
+            iconTheme: const IconThemeData(color: Colors.black),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(t('official_receipt'), style: const TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(
+                  DateFormat('dd MMM yyyy').format(_selectedDate),
+                  style: const TextStyle(color: kPrimary, fontSize: 13),
+                ),
+              ],
+            ),
+            centerTitle: true,
+            actions: [
+              if (_selectedDate.year != DateTime.now().year ||
+                  _selectedDate.month != DateTime.now().month ||
+                  _selectedDate.day != DateTime.now().day)
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.grey),
+                  tooltip: "Today",
+                  onPressed: () => setState(() => _selectedDate = DateTime.now()),
+                ),
+              IconButton(
+                icon: const Icon(Icons.calendar_month, color: kPrimary),
+                tooltip: "Change Date",
+                onPressed: _pickDate,
+              ),
+            ],
+          ),
+
+          // ---- BETS REAL-TIME STREAM ----
+          body: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('bets')
+                .where('userId', isEqualTo: uid)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(child: Text("Error: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
+              }
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator(color: kPrimary));
+              }
+
+              // Filter bets for selected date only
+              final selStart = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+              final selEnd = selStart.add(const Duration(days: 1));
+
+              final filteredDocs = snapshot.data!.docs.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final Timestamp? ts = data['timestamp'];
+                if (ts == null) return false;
+                final dt = ts.toDate();
+                return dt.isAfter(selStart) && dt.isBefore(selEnd);
+              }).toList();
+
+              // --- Aggregate per game ---
+              final Map<String, Map<String, double>> gameStats = {};
+
+              for (final doc in filteredDocs) {
+                final data = doc.data() as Map<String, dynamic>;
+                final String game = data['gameName'] ?? 'Unknown';
+                final double amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
+                // Payment only from WON bets — updates live when admin declares result
+                final double payment = data['status'] == 'won'
+                    ? (data['potentialWin'] as num?)?.toDouble() ?? 0.0
+                    : 0.0;
+
+                gameStats.putIfAbsent(game, () => {'dhanda': 0.0, 'payment': 0.0});
+                gameStats[game]!['dhanda'] = gameStats[game]!['dhanda']! + amount;
+                gameStats[game]!['payment'] = gameStats[game]!['payment']! + payment;
+              }
+
+              // --- Totals ---
+              double totalDhanda = 0;
+              double totalPayment = 0;
+              gameStats.forEach((_, v) {
+                totalDhanda += v['dhanda']!;
+                totalPayment += v['payment']!;
+              });
+
+              final double commission = totalDhanda * commissionRate;
+              final double netDhanda = totalDhanda - commission;
+              // आजची बाकी = net dhanda - win payments
+              final double aajchiBaki = netDhanda - totalPayment;
+
+              // ---- TRANSACTIONS STREAM (vasuli + vatap) ----
+              // Nested StreamBuilder for same-date admin transactions
+              return StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('transactions')
+                    .where('userId', isEqualTo: uid)
+                    .snapshots(),
+                builder: (context, txSnap) {
+                  double vasuli = 0.0; // Agent ne admin ko cash diya (type: 'deduct')
+                  double vatap = 0.0;  // Admin ne agent ko cash diya (type: 'add') — sirf manual payment
+
+                  if (txSnap.hasData) {
+                    for (final doc in txSnap.data!.docs) {
+                      final d = doc.data() as Map<String, dynamic>;
+                      final Timestamp? ts = d['timestamp'];
+                      if (ts == null) continue;
+                      final dt = ts.toDate();
+                      if (!dt.isAfter(selStart) || !dt.isBefore(selEnd)) continue;
+
+                      final double amt = (d['amount'] as num?)?.toDouble() ?? 0.0;
+                      final String type = d['type'] ?? '';
+
+                      if (type == 'deduct') {
+                        // Agent ne admin ko cash diya — vasuli
+                        vasuli += amt.abs();
+                      } else if (type == 'add') {
+                        // Admin ne agent ko cash diya — vatap (sirf manual payment)
+                        vatap += amt.abs();
+                      }
+                      // 'win' type nahi hai — win sirf limit badhata hai, vasuli/vatap nahi
+                    }
+                  }
+
+                  // अंतिम बाकी = थकबाकी + आजची बाकी - वसुली + वाटप
+                  // Logic: previous dues + today's net baki - what agent paid + what admin paid
+                  final double ekunBaki = thakbaki + aajchiBaki;
+                  final double antimbaki = ekunBaki - vasuli + vatap;
+
+                  // ---- EMPTY STATE ----
+                  if (filteredDocs.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey),
+                          const SizedBox(height: 12),
+                          Text(
+                            "${DateFormat('dd MMM yyyy').format(_selectedDate)} रोजी कोणतीही बेट नाही",
+                            style: const TextStyle(color: Colors.grey, fontSize: 15),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 20),
+                          TextButton.icon(
+                            onPressed: _pickDate,
+                            icon: const Icon(Icons.calendar_month, color: kPrimary),
+                            label: const Text("दुसरी तारीख निवडा", style: TextStyle(color: kPrimary)),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  // ---- SLIP UI ----
+                  return SingleChildScrollView(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+
+                        // Header
+                        Center(child: Text(t('title'), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black))),
+                        Center(child: Text(userName, style: const TextStyle(color: kPrimary, fontSize: 15, fontWeight: FontWeight.w600))),
+                        Center(child: Text(t('official_receipt'), style: const TextStyle(color: Colors.grey, fontSize: 13))),
+                        const Divider(color: Colors.black, thickness: 1.2),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text("${t('date')}: ${DateFormat('dd-MM-yyyy').format(_selectedDate)}", style: const TextStyle(color: Colors.black, fontSize: 13)),
+                            Text("${t('id')}: ...${uid.substring(0, 5)}", style: const TextStyle(color: Colors.black, fontSize: 13)),
+                          ],
+                        ),
+                        const Divider(color: Colors.black, thickness: 1.2),
+                        const SizedBox(height: 8),
+
+                        // Column Headers: Game | Dhanda | Payment
+                        Row(
+                          children: [
+                            Expanded(flex: 3, child: Text(t('game'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 14))),
+                            Expanded(flex: 2, child: Text(t('dhanda'), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 14))),
+                            Expanded(flex: 2, child: Text(t('payment'), textAlign: TextAlign.right, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 14))),
+                          ],
+                        ),
+                        const Divider(color: Colors.black),
+
+                        // Game rows
+                        ...gameStats.entries.map((e) {
+                          final bool hasPendingBets = filteredDocs.any((doc) {
+                            final d = doc.data() as Map<String, dynamic>;
+                            return d['gameName'] == e.key && d['status'] == 'pending';
+                          });
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 7.0),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: Row(
+                                    children: [
+                                      Flexible(child: Text(e.key, style: const TextStyle(color: Colors.black, fontSize: 13))),
+                                      if (hasPendingBets) ...[
+                                        const SizedBox(width: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                          decoration: BoxDecoration(color: Colors.orange.shade100, borderRadius: BorderRadius.circular(4)),
+                                          child: const Text("pending", style: TextStyle(color: Colors.orange, fontSize: 9, fontWeight: FontWeight.bold)),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                Expanded(flex: 2, child: Text(e.value['dhanda']!.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(color: Colors.green, fontSize: 13, fontWeight: FontWeight.bold))),
+                                Expanded(flex: 2, child: Text(e.value['payment']!.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold))),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+
+                        const Divider(color: Colors.black),
+
+                        // Calculation rows
+                        _buildCalcRow(t('total'), totalDhanda, totalPayment, isBold: true),
+                        _buildCalcRow('कमिशन (${commissionPct.toStringAsFixed(0)}%)', commission, null),
+                        _buildCalcRow(t('total'), netDhanda, totalPayment, isBold: true),
+
+                        const SizedBox(height: 12),
+
+                        // ---- आजची बाकी (BAKI) — purple strip ----
+                        Container(
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: kPurpleLedger,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(t('baki'), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                              Text(aajchiBaki.toStringAsFixed(2), style: TextStyle(
+                                color: aajchiBaki >= 0 ? Colors.greenAccent.shade100 : Colors.red.shade200,
+                                fontSize: 18, fontWeight: FontWeight.bold,
+                              )),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // मागील जमा + आजचे जमा
+                        _buildFinalRow(t('prev_baki'), thakbaki, Colors.black87),
+                        _buildFinalRow(t('today_baki'), aajchiBaki, aajchiBaki >= 0 ? Colors.green.shade700 : Colors.red.shade700),
+
+                        // एकूण बाकी box
+                        const SizedBox(height: 4),
+                        Container(
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: ekunBaki >= 0 ? Colors.green.shade50 : Colors.red.shade50,
+                            border: Border.all(color: ekunBaki >= 0 ? Colors.green.shade300 : Colors.red.shade300, width: 1.5),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(t('total_baki'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
+                              Text(ekunBaki.toStringAsFixed(2), style: TextStyle(
+                                fontSize: 17, fontWeight: FontWeight.bold,
+                                color: ekunBaki >= 0 ? Colors.green.shade800 : Colors.red.shade800,
+                              )),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 10),
+                        const Divider(color: Colors.black12, thickness: 1),
+
+                        // ---- थकबाकी (outstanding) ----
+                        _buildFinalRow(t('outstanding'), thakbaki, Colors.black87),
+
+                        // ---- वसुली / वाटप — GREEN background ----
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF00E676), // Bright green like video
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+                          child: Column(
+                            children: [
+                              // वसुली row
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(t('vasuli'), style: const TextStyle(
+                                      color: Color(0xFF1A237E), fontSize: 17, fontWeight: FontWeight.bold,
+                                    )),
+                                    Text(vasuli.toStringAsFixed(0), style: const TextStyle(
+                                      color: Color(0xFFB71C1C), fontSize: 17, fontWeight: FontWeight.bold,
+                                    )),
+                                  ],
+                                ),
+                              ),
+                              const Divider(color: Colors.white38, height: 1),
+                              // वाटप row
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(t('vatap'), style: const TextStyle(
+                                      color: Color(0xFF1A237E), fontSize: 17, fontWeight: FontWeight.bold,
+                                    )),
+                                    Text(vatap.toStringAsFixed(0), style: const TextStyle(
+                                      color: Color(0xFFB71C1C), fontSize: 17, fontWeight: FontWeight.bold,
+                                    )),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        // ---- अंतिम बाकी ----
+                        _buildFinalRow(t('final_baki'), antimbaki, antimbaki >= 0 ? Colors.green.shade800 : Colors.red.shade800),
+
+                        // Pending bets notice
+                        if (filteredDocs.any((d) => (d.data() as Map<String, dynamic>)['status'] == 'pending')) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              border: Border.all(color: Colors.orange.shade300),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: const [
+                                Icon(Icons.info_outline, color: Colors.orange, size: 18),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    "काही बेट्स अजून Pending आहेत. Admin निकाल जाहीर केल्यावर Payment आपोआप अपडेट होईल.",
+                                    style: TextStyle(color: Colors.orange, fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        const SizedBox(height: 24),
+                        Center(child: Text(t('thank_you'), style: const TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))),
+                        const SizedBox(height: 16),
+
+                        // PDF Download button
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 13),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            icon: const Icon(Icons.picture_as_pdf),
+                            label: Text(t('download_pdf'), style: const TextStyle(fontWeight: FontWeight.bold)),
+                            onPressed: () => _generateAndPrintPDF(
+                              context: context,
+                              gameStats: gameStats,
+                              totalDhanda: totalDhanda,
+                              totalPayment: totalPayment,
+                              commission: commission,
+                              baki: aajchiBaki,
+                              maagilJama: thakbaki,
+                              ekunBaki: ekunBaki,
+                              userName: userName,
+                              commissionPct: commissionPct,
+                              vasuli: vasuli,
+                              vatap: vatap,
+                              antimbaki: antimbaki,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
@@ -1902,17 +2384,80 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(title, style: TextStyle(fontSize: 16, color: Colors.black87, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+          Text(title, style: TextStyle(
+            fontSize: 16,
+            color: isBold ? const Color(0xFF311B92) : const Color(0xFF311B92),
+            fontWeight: isBold ? FontWeight.bold : FontWeight.normal
+          )),
           if (betAmount != null)
+            // Image format: "betAmount.00 = Rs.winAmount" - betAmount on left, winAmount on right
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(amount.toStringAsFixed(2), style: const TextStyle(fontSize: 16, color: Colors.black87)),
+                Text(
+                  betAmount.toStringAsFixed(2),
+                  style: const TextStyle(fontSize: 16, color: Color(0xFFD32F2F), fontWeight: FontWeight.w500),
+                ),
                 const SizedBox(width: 8),
-                Text("= Rs.${betAmount.toStringAsFixed(0)}", style: const TextStyle(fontSize: 16, color: Colors.black54)),
+                Text(
+                  "= Rs.${amount.toStringAsFixed(0)}",
+                  style: const TextStyle(fontSize: 15, color: Colors.black54),
+                ),
               ],
             )
           else
-            Text(amount.toStringAsFixed(2), style: TextStyle(fontSize: 16, color: Colors.black87, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+            Text(
+              amount.toStringAsFixed(2),
+              style: TextStyle(
+                fontSize: 16,
+                color: const Color(0xFFD32F2F),
+                fontWeight: isBold ? FontWeight.bold : FontWeight.w500
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, top: 20, bottom: 6),
+      child: Text(
+        title,
+        style: const TextStyle(color: Color(0xFF1A73E8), fontSize: 22, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Widget _buildTotalRow(String title, double amount, {Color bgColor = Colors.transparent}) {
+    return Container(
+      color: bgColor,
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title, style: const TextStyle(fontSize: 18, color: Color(0xFF311B92), fontWeight: FontWeight.bold)),
+          Text(amount.toStringAsFixed(2), style: const TextStyle(fontSize: 18, color: Color(0xFFD32F2F), fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryRow(String title, double amount, {bool isBold = false, Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title, style: TextStyle(fontSize: 15, color: Colors.black87, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+          Text(
+            amount.toStringAsFixed(2),
+            style: TextStyle(
+              fontSize: 15,
+              color: valueColor ?? (amount >= 0 ? Colors.green.shade700 : Colors.red.shade700),
+              fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
         ],
       ),
     );
@@ -1924,28 +2469,28 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
       stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
       builder: (context, userSnapshot) {
         String headerName = "Loading...";
-        String headerSub = "Loading...";
+        String headerResult = "---";
         double maagilJama = 0.0;
-        double customComm = 0.10; 
+        double customComm = 0.10;
 
         if (userSnapshot.hasData && userSnapshot.data!.exists) {
           var uData = userSnapshot.data!.data() as Map<String, dynamic>;
           headerName = uData['name'] ?? (uData['email'] as String?)?.split('@')[0] ?? "User";
-          headerSub = uData['phone'] ?? widget.uid.substring(0, 6);
-          maagilJama = (uData['balance'] ?? 0).toDouble(); 
-          if(uData.containsKey('commission')) customComm = (uData['commission'] as num).toDouble() / 100;
+          headerResult = uData['phone'] ?? widget.uid.substring(0, 6);
+          maagilJama = (uData['balance'] ?? 0).toDouble();
+          if (uData.containsKey('commission')) customComm = (uData['commission'] as num).toDouble() / 100;
         }
 
         return Scaffold(
-          backgroundColor: Colors.white, 
+          backgroundColor: Colors.white,
           appBar: AppBar(
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text(headerName, style: const TextStyle(color: kPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
                 Text(
-                  _selectedDate != null ? DateFormat('dd MMM yyyy').format(_selectedDate!) : headerSub,
-                  style: const TextStyle(color: kTextSub, fontSize: 14)
+                  _selectedDate != null ? DateFormat('dd MMM yyyy').format(_selectedDate!) : headerResult,
+                  style: const TextStyle(color: kTextSub, fontSize: 14),
                 ),
               ],
             ),
@@ -1971,17 +2516,22 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
                 .where('gameId', isEqualTo: widget.gameId)
                 .snapshots(),
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: kPrimary));
-              
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: kPrimary));
+              }
+
               var docs = snapshot.data?.docs ?? [];
-              
+
+              // Date filter
               if (_selectedDate != null) {
                 docs = docs.where((doc) {
                   var data = doc.data() as Map<String, dynamic>;
                   Timestamp? ts = data['timestamp'];
                   if (ts == null) return false;
                   DateTime dt = ts.toDate();
-                  return dt.year == _selectedDate!.year && dt.month == _selectedDate!.month && dt.day == _selectedDate!.day;
+                  return dt.year == _selectedDate!.year &&
+                      dt.month == _selectedDate!.month &&
+                      dt.day == _selectedDate!.day;
                 }).toList();
               } else {
                 final now = DateTime.now();
@@ -1994,89 +2544,178 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
                 }).toList();
               }
 
+              // --- ALSO fetch game result for header display ---
+              // Aggregate calculations
               double openDhanda = 0, closeDhanda = 0;
               double openSinglePay = 0, openSingleBet = 0;
-              double openPannaPay = 0, openPannaBet = 0;
               double closeSinglePay = 0, closeSingleBet = 0;
-              double closePannaPay = 0, closePannaBet = 0;
+              double closeSPPay = 0, closeSPBet = 0;
+              double closeDPPay = 0, closeDPBet = 0;
+              double closeTPPay = 0, closeTPBet = 0;
               double jodiPay = 0, jodiBet = 0;
+
+              // Open Panna broken into SP/DP/TP
+              double openSPPay = 0, openSPBet = 0;
+              double openDPPay = 0, openDPBet = 0;
+              double openTPPay = 0, openTPBet = 0;
 
               for (var doc in docs) {
                 var data = doc.data() as Map<String, dynamic>;
                 double amount = (data['amount'] ?? 0).toDouble();
+                // Only won bets contribute to payment
                 double winAmt = data['status'] == 'won' ? (data['potentialWin'] ?? 0).toDouble() : 0.0;
                 String type = data['betType'] ?? '';
                 String session = data['session'] ?? 'Open';
 
-                if (session == 'Open') {
-                  openDhanda += amount;
-                } else {
-                  closeDhanda += amount;
-                }
+                if (session == 'Open') openDhanda += amount;
+                else closeDhanda += amount;
 
-                if (type.contains('Single Digit')) {
+                if (type == 'Single Digit') {
                   if (session == 'Open') { openSingleBet += amount; openSinglePay += winAmt; }
                   else { closeSingleBet += amount; closeSinglePay += winAmt; }
-                } else if (type.contains('Panna')) {
-                  if (session == 'Open') { openPannaBet += amount; openPannaPay += winAmt; }
-                  else { closePannaBet += amount; closePannaPay += winAmt; }
-                } else if (type.contains('Jodi')) {
-                  jodiBet += amount; jodiPay += winAmt;
+                } else if (type == 'Single Panna') {
+                  if (session == 'Open') { openSPBet += amount; openSPPay += winAmt; }
+                  else { closeSPBet += amount; closeSPPay += winAmt; }
+                } else if (type == 'Double Panna') {
+                  if (session == 'Open') { openDPBet += amount; openDPPay += winAmt; }
+                  else { closeDPBet += amount; closeDPPay += winAmt; }
+                } else if (type == 'Triple Panna') {
+                  if (session == 'Open') { openTPBet += amount; openTPPay += winAmt; }
+                  else { closeTPBet += amount; closeTPPay += winAmt; }
+                } else if (type == 'Jodi Digit') {
+                  jodiBet += amount;
+                  jodiPay += winAmt;
                 }
               }
 
+              // Combined Panna totals for display
+              double openPannaBet = openSPBet + openDPBet + openTPBet;
+              double openPannaPay = openSPPay + openDPPay + openTPPay;
+              double closePannaBet = closeSPBet + closeDPBet + closeTPBet;
+              double closePannaPay = closeSPPay + closeDPPay + closeTPPay;
+
               double totalDhanda = openDhanda + closeDhanda;
-              double commission = totalDhanda * customComm; 
-              double totalPayment = openSinglePay + openPannaPay + closeSinglePay + closePannaPay + jodiPay;
-              double totalJama = totalPayment + commission;
+              double commission = totalDhanda * customComm;
+              double totalWinPayment = openSinglePay + openPannaPay + closeSinglePay + closePannaPay + jodiPay;
+              double totalJama = totalWinPayment + commission;
               double baki = totalDhanda - totalJama;
-              
               double ekunJama = maagilJama + baki;
+
+              if (docs.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey),
+                      const SizedBox(height: 12),
+                      Text(
+                        _selectedDate != null
+                            ? "${DateFormat('dd MMM yyyy').format(_selectedDate!)} रोजी कोणतीही बेट नाही"
+                            : "आज कोणतीही बेट नाही",
+                        style: const TextStyle(color: Colors.grey, fontSize: 16),
+                      ),
+                    ],
+                  ),
+                );
+              }
 
               return SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.only(left: 16, top: 20, bottom: 10),
-                      child: Text("धंदा", style: TextStyle(color: Colors.green, fontSize: 18, fontWeight: FontWeight.bold)),
-                    ),
-                    _buildLedgerRow("ओपन धंदा", openDhanda),
-                    _buildLedgerRow("क्लोज धंदा", closeDhanda),
-                    _buildLedgerRow("फेर अमाउंट", 0.00),
-                    _buildLedgerRow("टोटल नावे", totalDhanda, bgColor: Colors.grey.shade200),
 
-                    const Padding(
-                      padding: EdgeInsets.only(left: 16, top: 20, bottom: 10),
-                      child: Text("पेमेंट", style: TextStyle(color: Colors.green, fontSize: 18, fontWeight: FontWeight.bold)),
-                    ),
-                    _buildLedgerRow("ओपन सिंगल", openSinglePay, betAmount: openSingleBet),
-                    _buildLedgerRow("ओपन पाना", openPannaPay, betAmount: openPannaBet),
-                    _buildLedgerRow("जोड", jodiPay, betAmount: jodiBet),
-                    _buildLedgerRow("क्लोज सिंगल", closeSinglePay, betAmount: closeSingleBet),
-                    _buildLedgerRow("क्लोज पाना", closePannaPay, betAmount: closePannaBet),
-                    _buildLedgerRow("कमिशन", commission),
-                    _buildLedgerRow("फेर अमाउंट", 0.00),
-                    _buildLedgerRow("टोटल जमा", totalJama, bgColor: Colors.grey.shade200),
+                    // ===================== DHANDA SECTION =====================
+                    _buildSectionHeader("धंदा"),
+                    const Divider(height: 1, color: Colors.black12, indent: 16, endIndent: 16),
+                    _buildLedgerRow("Open Dhanda", openDhanda),
+                    _buildLedgerRow("Close Dhanda", closeDhanda),
+                    _buildLedgerRow("Fer Amount", 0.00),
+                    _buildTotalRow("Total Naave", totalDhanda, bgColor: Colors.grey.shade100),
 
-                    const SizedBox(height: 10),
-                    
-                    _buildLedgerRow("टोटल धंदा", totalDhanda, isBold: true),
-                    _buildLedgerRow("टोटल पेमेंट", totalJama, isBold: true),
-                    _buildLedgerRow("बाकी", baki, isBold: true),
-                    const Divider(),
-                    _buildLedgerRow("मागील जमा", maagilJama),
-                    _buildLedgerRow("बाकी", baki),
-                    _buildLedgerRow("एकूण जमा", ekunJama, isBold: true),
-                    
-                    const SizedBox(height: 30),
+                    // ===================== PAYMENT SECTION =====================
+                    _buildSectionHeader("पेमेंट"),
+                    const Divider(height: 1, color: Colors.black12, indent: 16, endIndent: 16),
+                    _buildLedgerRow("Open Single", openSinglePay, betAmount: openSingleBet),
+                    if (openSPBet > 0 || openSPPay > 0)
+                      _buildLedgerRow("Open SP (Single Panna)", openSPPay, betAmount: openSPBet),
+                    if (openDPBet > 0 || openDPPay > 0)
+                      _buildLedgerRow("Open DP (Double Panna)", openDPPay, betAmount: openDPBet),
+                    if (openTPBet > 0 || openTPPay > 0)
+                      _buildLedgerRow("Open TP (Triple Panna)", openTPPay, betAmount: openTPBet),
+                    if (openSPBet == 0 && openDPBet == 0 && openTPBet == 0)
+                      _buildLedgerRow("Open Pana", openPannaPay, betAmount: openPannaBet),
+                    _buildLedgerRow("Jodi", jodiPay, betAmount: jodiBet),
+                    _buildLedgerRow("Close Single", closeSinglePay, betAmount: closeSingleBet),
+                    if (closeSPBet > 0 || closeSPPay > 0)
+                      _buildLedgerRow("Close SP (Single Panna)", closeSPPay, betAmount: closeSPBet),
+                    if (closeDPBet > 0 || closeDPPay > 0)
+                      _buildLedgerRow("Close DP (Double Panna)", closeDPPay, betAmount: closeDPBet),
+                    if (closeTPBet > 0 || closeTPPay > 0)
+                      _buildLedgerRow("Close TP (Triple Panna)", closeTPPay, betAmount: closeTPBet),
+                    if (closeSPBet == 0 && closeDPBet == 0 && closeTPBet == 0)
+                      _buildLedgerRow("Close Pana", closePannaPay, betAmount: closePannaBet),
+                    _buildLedgerRow("Commission (${(customComm * 100).toStringAsFixed(0)}%)", commission),
+                    _buildLedgerRow("Fer Amount", 0.00),
+                    _buildTotalRow("Total Jama", totalJama, bgColor: Colors.grey.shade100),
+
+                    // ===================== BAKI SECTION =====================
+                    const SizedBox(height: 8),
+                    const Divider(thickness: 1.5, color: Colors.black26),
+
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+                      decoration: BoxDecoration(
+                        color: baki >= 0 ? Colors.green.shade50 : Colors.red.shade50,
+                        border: Border.all(color: baki >= 0 ? Colors.green.shade300 : Colors.red.shade300, width: 1.5),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text("बाकी (Baki)", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: baki >= 0 ? Colors.green.shade800 : Colors.red.shade800)),
+                              Text(baki.toStringAsFixed(2), style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: baki >= 0 ? Colors.green.shade800 : Colors.red.shade800)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            baki >= 0 ? "Admin को देना है: ₹${baki.toStringAsFixed(2)}" : "Admin से लेना है: ₹${baki.abs().toStringAsFixed(2)}",
+                            style: TextStyle(fontSize: 12, color: baki >= 0 ? Colors.green.shade700 : Colors.red.shade700),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+                    _buildSummaryRow("मागील जमा (Prev Balance)", maagilJama, valueColor: Colors.black87),
+                    _buildSummaryRow("आजची बाकी (Today Baki)", baki, valueColor: baki >= 0 ? Colors.green.shade700 : Colors.red.shade700),
+                    Container(
+                      margin: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF7B1FA2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text("एकूण जमा (Total)", style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Colors.white)),
+                          Text(ekunJama.toStringAsFixed(2), style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: Colors.white)),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
                   ],
                 ),
               );
             },
           ),
         );
-      }
+      },
     );
   }
 }

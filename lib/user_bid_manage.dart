@@ -129,57 +129,178 @@ class _UserBidManagePageState extends State<UserBidManagePage> {
 
   // --- FULL CHART DIALOG (WhatsApp Style) ---
   void _showFullChart(BuildContext context, String userId, String chatId) {
+    // First fetch the chat to get gameId
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0B141A), // WhatsApp dark background
-        title: const Text("मूळ चार्ट (Original Chart)", style: TextStyle(color: Colors.white, fontSize: 16)),
-        content: FutureBuilder<DocumentSnapshot>(
-          future: FirebaseFirestore.instance.collection('users').doc(userId).collection('game_chats').doc(chatId).get(),
-          builder: (context, snapshot) {
-             if (snapshot.connectionState == ConnectionState.waiting) {
-                return const SizedBox(height: 100, child: Center(child: CircularProgressIndicator(color: Colors.amber)));
-             }
-             if (!snapshot.hasData || !snapshot.data!.exists) {
-                return const Text("चार्ट उपलब्ध नाही (Chart not found)", style: TextStyle(color: Colors.white70));
-             }
-             
-             var chatData = snapshot.data!.data() as Map<String, dynamic>;
-             String text = chatData['text'] ?? '';
-             int total = int.tryParse(chatData['total']?.toString() ?? '') ?? 0;
-             var time = (chatData['timestamp'] as Timestamp?)?.toDate();
-             String timeStr = time != null ? DateFormat('hh:mm a').format(time) : '';
+      builder: (ctx) => FutureBuilder<DocumentSnapshot>(
+        future: FirebaseFirestore.instance.collection('users').doc(userId).collection('game_chats').doc(chatId).get(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const AlertDialog(
+              backgroundColor: Color(0xFF0B141A),
+              content: SizedBox(height: 100, child: Center(child: CircularProgressIndicator(color: Colors.amber))),
+            );
+          }
+          if (!snapshot.hasData || !snapshot.data!.exists) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0B141A),
+              title: const Text("Error", style: TextStyle(color: Colors.white)),
+              content: const Text("चार्ट उपलब्ध नाही (Chart not found)", style: TextStyle(color: Colors.white70)),
+              actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close", style: TextStyle(color: Colors.amber)))],
+            );
+          }
+          
+          var chatData = snapshot.data!.data() as Map<String, dynamic>;
+          String text = chatData['text'] ?? '';
+          int total = int.tryParse(chatData['total']?.toString() ?? '') ?? 0;
+          String gameId = chatData['gameId'] ?? '';
+          var time = (chatData['timestamp'] as Timestamp?)?.toDate();
+          String timeStr = time != null ? DateFormat('dd MMM yyyy, hh:mm a').format(time) : '';
+          DateTime chatDate = time ?? DateTime.now();
 
-             return Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF005D4B), 
-                  borderRadius: BorderRadius.circular(12)
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Align(alignment: Alignment.centerLeft, child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 15))),
-                    const SizedBox(height: 8),
-                    const Divider(color: Colors.white24, height: 1),
-                    const SizedBox(height: 4),
-                    Row(
+          return Dialog(
+            backgroundColor: const Color(0xFF0B141A),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF1F2C34),
+                      borderRadius: BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
+                    ),
+                    child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                         Text("Total: ₹$total", style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 12)),
-                         Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 10)),
-                      ]
-                    )
-                  ]
-                )
-             );
-          }
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close", style: TextStyle(color: Colors.amber)))
-        ]
-      )
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text("मूळ चार्ट (Original Chart)", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                            Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                          ],
+                        ),
+                        IconButton(icon: const Icon(Icons.close, color: Colors.white54), onPressed: () => Navigator.pop(ctx)),
+                      ],
+                    ),
+                  ),
+                  // Original bid text
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: const Color(0xFF005D4B), borderRadius: BorderRadius.circular(12)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("📋 Original Bid Text:", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 6),
+                        Text(text, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                        const SizedBox(height: 8),
+                        const Divider(color: Colors.white24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text("Total: ₹$total", style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                            Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // All bets for this game on this date
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(Icons.bar_chart, color: Colors.amber, size: 14),
+                        SizedBox(width: 6),
+                        Text("सर्व बेट्स - या तारखेसाठी (All Bets This Date):", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                  if (gameId.isNotEmpty)
+                    FutureBuilder<QuerySnapshot>(
+                      future: FirebaseFirestore.instance.collection('bets')
+                          .where('chatId', isEqualTo: chatId)
+                          .get(),
+                      builder: (context, betSnap) {
+                        if (betSnap.connectionState == ConnectionState.waiting) {
+                          return const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: CircularProgressIndicator(color: Colors.amber),
+                          );
+                        }
+                        if (!betSnap.hasData || betSnap.data!.docs.isEmpty) {
+                          return const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: Text("No bet details found", style: TextStyle(color: Colors.white54, fontSize: 12)),
+                          );
+                        }
+                        var bets = betSnap.data!.docs;
+                        return ConstrainedBox(
+                          constraints: const BoxConstraints(maxHeight: 250),
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(color: const Color(0xFF1F2C34), borderRadius: BorderRadius.circular(8)),
+                            child: Column(
+                              children: [
+                                // Header row
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: const BoxDecoration(color: Color(0xFF2A3942), borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8))),
+                                  child: const Row(
+                                    children: [
+                                      Expanded(flex: 2, child: Text("Number", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                      Expanded(flex: 2, child: Text("Type", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                      Expanded(child: Text("₹ Amt", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                      Expanded(child: Text("Status", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                    ],
+                                  ),
+                                ),
+                                Expanded(
+                                  child: ListView.builder(
+                                    itemCount: bets.length,
+                                    itemBuilder: (ctx, i) {
+                                      var bd = bets[i].data() as Map<String, dynamic>;
+                                      String statusStr = bd['status'] ?? 'pending';
+                                      Color statusColor = statusStr == 'won' ? Colors.green : (statusStr == 'loss' ? Colors.red : Colors.orange);
+                                      return Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white12))),
+                                        child: Row(
+                                          children: [
+                                            Expanded(flex: 2, child: Text(bd['number']?.toString() ?? '', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
+                                            Expanded(flex: 2, child: Text(bd['betType']?.toString() ?? '', style: const TextStyle(color: Colors.white70, fontSize: 10))),
+                                            Expanded(child: Text("₹${bd['amount']}", style: const TextStyle(color: Colors.greenAccent, fontSize: 12))),
+                                            Expanded(child: Text(statusStr.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold))),
+                                          ],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx), 
+                    child: const Text("बंद करा (Close)", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold))
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -399,11 +520,16 @@ class _UserBidManagePageState extends State<UserBidManagePage> {
                       return const Center(child: Text("या फिल्टरसाठी कोणतीही बिड नाही. (No Bids matching filters)", style: TextStyle(color: kTextGrey)));
                     }
 
-                    // Total Calculation for displayed bids
+                    // Group bets by userId
+                    Map<String, List<QueryDocumentSnapshot>> groupedByUser = {};
                     int totalAmount = 0;
-                    for(var doc in docs) {
-                      totalAmount += int.tryParse((doc.data() as Map)['amount']?.toString() ?? '') ?? 0;
+                    for (var doc in docs) {
+                      var data = doc.data() as Map<String, dynamic>;
+                      String uId = data['userId'] ?? 'unknown';
+                      groupedByUser.putIfAbsent(uId, () => []).add(doc);
+                      totalAmount += int.tryParse(data['amount']?.toString() ?? '') ?? 0;
                     }
+                    List<String> userIds = groupedByUser.keys.toList();
 
                     return Column(
                       children: [
@@ -422,105 +548,22 @@ class _UserBidManagePageState extends State<UserBidManagePage> {
                         Expanded(
                           child: ListView.builder(
                             padding: const EdgeInsets.all(12),
-                            itemCount: docs.length,
+                            itemCount: userIds.length,
                             itemBuilder: (context, index) {
-                              var doc = docs[index];
-                              var data = doc.data() as Map<String, dynamic>;
-                              
-                              String uId = data['userId'] ?? '';
+                              String uId = userIds[index];
+                              List<QueryDocumentSnapshot> userDocs = groupedByUser[uId]!;
                               String agentName = _agentNamesCache[uId] ?? 'Unknown Agent';
-                              String gameName = data['gameName'] ?? '-';
-                              String session = data['session'] ?? 'Open';
-                              String betType = data['betType'] ?? '-';
-                              String number = data['number']?.toString() ?? '-';
-                              int amount = int.tryParse(data['amount']?.toString() ?? '') ?? 0;
-                              String status = data['status'] ?? 'pending';
-                              
-                              Timestamp? ts = data['timestamp'];
-                              String timeStr = ts != null ? DateFormat('hh:mm a').format(ts.toDate()) : '';
+                              int userTotal = userDocs.fold(0, (sum, d) => sum + (int.tryParse((d.data() as Map)['amount']?.toString() ?? '') ?? 0));
 
-                              return Card(
-                                elevation: 1,
-                                margin: const EdgeInsets.only(bottom: 10),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: Colors.grey.shade200)),
-                                color: Colors.white,
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(10),
-                                  onTap: () {
-                                    if(data.containsKey('chatId')) {
-                                      _showFullChart(context, uId, data['chatId']);
-                                    } else {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("चार्ट उपलब्ध नाही.")));
-                                    }
-                                  },
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(12.0),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                const Icon(Icons.person, size: 16, color: Colors.grey),
-                                                const SizedBox(width: 6),
-                                                Text(agentName, style: const TextStyle(fontWeight: FontWeight.bold, color: kPrimary, fontSize: 15)),
-                                              ],
-                                            ),
-                                            Text(timeStr, style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                                          ],
-                                        ),
-                                        const Divider(height: 16, color: Colors.black12),
-                                        Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text("$gameName ($session)", style: const TextStyle(fontWeight: FontWeight.bold, color: kTextMain, fontSize: 13)),
-                                                  const SizedBox(height: 2),
-                                                  Text(betType, style: const TextStyle(color: kTextGrey, fontSize: 12)),
-                                                ],
-                                              ),
-                                            ),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                              decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-                                              child: Column(
-                                                children: [
-                                                  const Text("Number", style: TextStyle(fontSize: 10, color: Colors.blueGrey)),
-                                                  Text(number, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blue.shade900)),
-                                                ],
-                                              ),
-                                            ),
-                                            const SizedBox(width: 16),
-                                            Column(
-                                              crossAxisAlignment: CrossAxisAlignment.end,
-                                              children: [
-                                                Text("₹$amount", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: kSuccess)),
-                                                const SizedBox(height: 4),
-                                                _buildStatusBadge(status),
-                                              ],
-                                            )
-                                          ],
-                                        ),
-                                        // If pending, allow delete
-                                        if (status == 'pending') ...[
-                                          const SizedBox(height: 8),
-                                          Align(
-                                            alignment: Alignment.centerRight,
-                                            child: InkWell(
-                                              onTap: () => _deleteBid(doc.id, amount, uId),
-                                              child: const Text("Delete Bid", style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
-                                            ),
-                                          )
-                                        ]
-                                      ],
-                                    ),
-                                  ),
-                                ),
+                              return _UserBidCard(
+                                agentName: agentName,
+                                userId: uId,
+                                userTotal: userTotal,
+                                bets: userDocs,
+                                agentCache: _agentNamesCache,
+                                onDelete: _deleteBid,
+                                onChartTap: (uid, chatId) => _showFullChart(context, uid, chatId),
+                                buildStatusBadge: _buildStatusBadge,
                               );
                             },
                           ),
@@ -530,6 +573,166 @@ class _UserBidManagePageState extends State<UserBidManagePage> {
                   }
                 )
           )
+        ],
+      ),
+    );
+  }
+}
+
+// --- GROUPED USER BID CARD (1 card per user, expandable) ---
+class _UserBidCard extends StatefulWidget {
+  final String agentName;
+  final String userId;
+  final int userTotal;
+  final List<QueryDocumentSnapshot> bets;
+  final Map<String, String> agentCache;
+  final Function(String, int, String) onDelete;
+  final Function(String, String) onChartTap;
+  final Widget Function(String) buildStatusBadge;
+
+  const _UserBidCard({
+    required this.agentName,
+    required this.userId,
+    required this.userTotal,
+    required this.bets,
+    required this.agentCache,
+    required this.onDelete,
+    required this.onChartTap,
+    required this.buildStatusBadge,
+  });
+
+  @override
+  State<_UserBidCard> createState() => _UserBidCardState();
+}
+
+class _UserBidCardState extends State<_UserBidCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    String initials = widget.agentName.isNotEmpty ? widget.agentName[0].toUpperCase() : '?';
+
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: _expanded ? kPrimary.withOpacity(0.4) : Colors.grey.shade200, width: 1.5),
+      ),
+      color: Colors.white,
+      child: Column(
+        children: [
+          // Collapsed header
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42, height: 42,
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: kPrimary.withOpacity(0.12)),
+                    child: Center(child: Text(initials, style: const TextStyle(color: kPrimary, fontWeight: FontWeight.bold, fontSize: 18))),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(widget.agentName, style: const TextStyle(color: kPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text("${widget.bets.length} bid${widget.bets.length > 1 ? 's' : ''}", style: const TextStyle(color: kTextGrey, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text("₹${widget.userTotal}", style: const TextStyle(color: kSuccess, fontWeight: FontWeight.bold, fontSize: 18)),
+                      Text("Total", style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                    ],
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(_expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: kPrimary),
+                ],
+              ),
+            ),
+          ),
+
+          // Expanded bets
+          if (_expanded) ...[
+            const Divider(height: 1, color: Colors.black12),
+            ...widget.bets.map((doc) {
+              var data = doc.data() as Map<String, dynamic>;
+              String gameName = data['gameName'] ?? '-';
+              String session = data['session'] ?? 'Open';
+              String betType = data['betType'] ?? '-';
+              String number = data['number']?.toString() ?? '-';
+              int amount = int.tryParse(data['amount']?.toString() ?? '') ?? 0;
+              String status = data['status'] ?? 'pending';
+              Timestamp? ts = data['timestamp'];
+              String timeStr = ts != null ? DateFormat('hh:mm a').format(ts.toDate()) : '';
+              String? chatId = data['chatId'];
+
+              return InkWell(
+                onTap: chatId != null ? () => widget.onChartTap(widget.userId, chatId) : null,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.black12))),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text("$gameName ($session)", style: const TextStyle(fontWeight: FontWeight.bold, color: kTextMain, fontSize: 13)),
+                                Text(betType, style: const TextStyle(color: kTextGrey, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                            child: Column(
+                              children: [
+                                const Text("Number", style: TextStyle(fontSize: 9, color: Colors.blueGrey)),
+                                Text(number, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue.shade900)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                                Text("₹$amount", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kSuccess)),
+                                const SizedBox(height: 3),
+                                widget.buildStatusBadge(status),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(timeStr, style: const TextStyle(color: Colors.grey, fontSize: 11)),
+                          if (status == 'pending')
+                            InkWell(
+                              onTap: () => widget.onDelete(doc.id, amount, widget.userId),
+                              child: const Text("Delete Bid", style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ],
         ],
       ),
     );
