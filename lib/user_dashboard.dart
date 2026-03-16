@@ -990,11 +990,9 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
   String? _zeroBidError(String numStr) {
     if (!RegExp(r'^\d+$').hasMatch(numStr)) return null;
     String type = _detectBetType(numStr);
-    if (type == 'Single Digit' && numStr == '0') {
-      return "❌ '0' सिंगल डिजिट invalid है";
-    }
+    // '0' single digit VALID hai — matka mein 0-9 sab digits valid hain
     // Jodi 00-99 tak valid hai, 0 se shuru ho sakti hai (04, 09, 00 sab valid)
-    if ((type == 'Single Panna' || type == 'Double Panna' || type == 'Triple Panna') && numStr.startsWith('0')) {
+    if ((type == 'Single Panna' || type == 'Double Panna' || type == 'Triple Panna') && numStr.startsWith('0') && numStr != '000') {
       return "❌ Panna '0' से शुरू नहीं हो सकता: $numStr";
     }
     return null;
@@ -1182,11 +1180,9 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
 
         // 0 से शुरू या सिर्फ 0 — ERROR दो, skip नहीं
         // Single digit "0" → invalid
-        if (type == 'Single Digit' && processedNumStr == '0') {
-          return;
-        }
-        // Panna 0 से शुरू (012, 045 etc.) → INVALID
-        if ((type == 'Single Panna' || type == 'Double Panna' || type == 'Triple Panna') && processedNumStr.startsWith('0')) {
+        // '0' single digit VALID hai — matka mein 0-9 sab valid hain
+        // Panna 0 से शुरू → INVALID (except 000 which is valid Triple Panna for digit 0)
+        if ((type == 'Single Panna' || type == 'Double Panna' || type == 'Triple Panna') && processedNumStr.startsWith('0') && processedNumStr != '000') {
           return;
         }
 
@@ -1768,6 +1764,14 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
   }) async {
     final pdf = pw.Document();
 
+    // Devanagari (Marathi) font load karo — printing package se
+    final devanagariFont = await PdfGoogleFonts.notoSansDevanagariRegular();
+    final devanagariBold = await PdfGoogleFonts.notoSansDevanagariBold();
+
+    // Marathi+English mixed text ke liye style helper
+    pw.TextStyle mrStyle({double fontSize = 11, PdfColor? color, bool bold = false}) =>
+        pw.TextStyle(font: bold ? devanagariBold : devanagariFont, fontSize: fontSize, color: color);
+
     pdf.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a4,
@@ -1777,7 +1781,7 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
             children: [
               pw.Center(child: pw.Text("MATKAWALA - OFFICIAL RECEIPT", style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold))),
               pw.SizedBox(height: 6),
-              pw.Center(child: pw.Text(userName, style: const pw.TextStyle(fontSize: 14, color: PdfColors.grey700))),
+              pw.Center(child: pw.Text(userName, style: mrStyle(fontSize: 14, color: PdfColors.grey700))),
               pw.SizedBox(height: 16),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -1790,9 +1794,9 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
               pw.SizedBox(height: 8),
               pw.Row(
                 children: [
-                  pw.Expanded(flex: 3, child: pw.Text("Game", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                  pw.Expanded(flex: 2, child: pw.Text("Dhanda", textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                  pw.Expanded(flex: 2, child: pw.Text("Payment", textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
+                  pw.Expanded(flex: 3, child: pw.Text("Game / गेम", style: mrStyle(bold: true))),
+                  pw.Expanded(flex: 2, child: pw.Text("Dhanda / धंदा", textAlign: pw.TextAlign.right, style: mrStyle(bold: true))),
+                  pw.Expanded(flex: 2, child: pw.Text("Payment / पेमेंट", textAlign: pw.TextAlign.right, style: mrStyle(bold: true))),
                 ],
               ),
               pw.Divider(),
@@ -1800,65 +1804,93 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                 padding: const pw.EdgeInsets.symmetric(vertical: 3),
                 child: pw.Row(
                   children: [
-                    pw.Expanded(flex: 3, child: pw.Text(e.key, style: const pw.TextStyle(fontSize: 11))),
-                    pw.Expanded(flex: 2, child: pw.Text(e.value['dhanda']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: const pw.TextStyle(fontSize: 11, color: PdfColors.green800))),
-                    pw.Expanded(flex: 2, child: pw.Text(e.value['payment']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: const pw.TextStyle(fontSize: 11, color: PdfColors.red800))),
+                    pw.Expanded(flex: 3, child: pw.Text(e.key, style: mrStyle(fontSize: 11))),
+                    pw.Expanded(flex: 2, child: pw.Text(e.value['dhanda']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: mrStyle(fontSize: 11, color: PdfColors.green800))),
+                    pw.Expanded(flex: 2, child: pw.Text(e.value['payment']!.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: mrStyle(fontSize: 11, color: PdfColors.red800))),
                   ],
                 ),
               )).toList(),
               pw.Divider(),
               pw.Row(children: [
-                pw.Expanded(flex: 3, child: pw.Text("एकूण Total", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Expanded(flex: 2, child: pw.Text(totalDhanda.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.green800))),
-                pw.Expanded(flex: 2, child: pw.Text(totalPayment.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.red800))),
+                pw.Expanded(flex: 3, child: pw.Text("एकूण Total", style: mrStyle(bold: true))),
+                pw.Expanded(flex: 2, child: pw.Text(totalDhanda.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: mrStyle(bold: true, color: PdfColors.green800))),
+                pw.Expanded(flex: 2, child: pw.Text(totalPayment.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: mrStyle(bold: true, color: PdfColors.red800))),
               ]),
               pw.SizedBox(height: 4),
               pw.Row(children: [
-                pw.Expanded(flex: 3, child: pw.Text("कमिशन (${commissionPct.toStringAsFixed(0)}%)")),
-                pw.Expanded(flex: 2, child: pw.Text(commission.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: const pw.TextStyle(color: PdfColors.green800))),
+                pw.Expanded(flex: 3, child: pw.Text("कमिशन Commission (${commissionPct.toStringAsFixed(0)}%)", style: mrStyle())),
+                pw.Expanded(flex: 2, child: pw.Text(commission.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: mrStyle(color: PdfColors.green800))),
                 pw.Expanded(flex: 2, child: pw.SizedBox()),
               ]),
               pw.SizedBox(height: 4),
               pw.Row(children: [
-                pw.Expanded(flex: 3, child: pw.Text("Net Dhanda", style: pw.TextStyle(fontWeight: pw.FontWeight.bold))),
-                pw.Expanded(flex: 2, child: pw.Text((totalDhanda - commission).toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.green800))),
-                pw.Expanded(flex: 2, child: pw.Text(totalPayment.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.red800))),
+                pw.Expanded(flex: 3, child: pw.Text("Net Dhanda", style: mrStyle(bold: true))),
+                pw.Expanded(flex: 2, child: pw.Text((totalDhanda - commission).toStringAsFixed(2), textAlign: pw.TextAlign.right, style: mrStyle(bold: true, color: PdfColors.green800))),
+                pw.Expanded(flex: 2, child: pw.Text(totalPayment.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: mrStyle(bold: true, color: PdfColors.red800))),
               ]),
-              pw.SizedBox(height: 12),
+              pw.SizedBox(height: 8),
+              // Winning Amount Row
+              pw.Container(
+                color: PdfColors.purple50,
+                padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text("Winning Amount / जिंकलेली रक्कम", style: mrStyle(bold: true, color: PdfColors.purple, fontSize: 13)),
+                    pw.Text("Rs. ${totalPayment.toStringAsFixed(0)}", style: mrStyle(bold: true, color: PdfColors.purple, fontSize: 13)),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 8),
               pw.Container(
                 color: PdfColors.purple,
                 padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text(baki >= 0 ? "बाकी (BAKI)" : "जमा (JAMA)", style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14)),
-                    pw.Text(baki.abs().toStringAsFixed(2), style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14)),
+                    pw.Text(baki >= 0 ? "बाकी (BAKI)" : "जमा (JAMA)", style: mrStyle(bold: true, color: PdfColors.white, fontSize: 14)),
+                    pw.Text(baki.abs().toStringAsFixed(2), style: mrStyle(bold: true, color: PdfColors.white, fontSize: 14)),
                   ],
                 ),
               ),
               pw.SizedBox(height: 10),
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("मागील जमा (Prev Balance)"), pw.Text(maagilJama.toStringAsFixed(2))]),
-              pw.SizedBox(height: 4),
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text(baki >= 0 ? "आजची बाकी (Today Baki)" : "आजची जमा (Today Jama)"), pw.Text(baki.abs().toStringAsFixed(2))]),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                pw.Text("मागील जमा (Prev Balance)", style: mrStyle()),
+                pw.Text(maagilJama.toStringAsFixed(2)),
+              ]),
               pw.SizedBox(height: 4),
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-                pw.Text(ekunBaki >= 0 ? "एकूण बाकी (Total Baki)" : "एकूण जमा (Total Jama)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                pw.Text(ekunBaki.abs().toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text(baki >= 0 ? "आजची बाकी (Today Baki)" : "आजची जमा (Today Jama)", style: mrStyle()),
+                pw.Text(baki.abs().toStringAsFixed(2)),
+              ]),
+              pw.SizedBox(height: 4),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                pw.Text(ekunBaki >= 0 ? "एकूण बाकी (Total Baki)" : "एकूण जमा (Total Jama)", style: mrStyle(bold: true)),
+                pw.Text(ekunBaki.abs().toStringAsFixed(2), style: mrStyle(bold: true)),
               ]),
               pw.SizedBox(height: 8),
               pw.Divider(),
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("थकबाकी (Outstanding)"), pw.Text(maagilJama.toStringAsFixed(2))]),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                pw.Text("थकबाकी (Outstanding)", style: mrStyle()),
+                pw.Text(maagilJama.toStringAsFixed(2)),
+              ]),
               pw.SizedBox(height: 4),
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("वसुली (Collected from Agent)"), pw.Text(vasuli.toStringAsFixed(0))]),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                pw.Text("वसुली (Collected from Agent)", style: mrStyle()),
+                pw.Text(vasuli.toStringAsFixed(0)),
+              ]),
               pw.SizedBox(height: 4),
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("वाटप (Paid to Agent)"), pw.Text(vatap.toStringAsFixed(0))]),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                pw.Text("वाटप (Paid to Agent)", style: mrStyle()),
+                pw.Text(vatap.toStringAsFixed(0)),
+              ]),
               pw.SizedBox(height: 6),
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-                pw.Text(antimbaki >= 0 ? "अंतिम बाकी (Final Baki)" : "अंतिम जमा (Final Jama)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                pw.Text(antimbaki.abs().toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text(antimbaki >= 0 ? "अंतिम बाकी (Final Baki)" : "अंतिम जमा (Final Jama)", style: mrStyle(bold: true)),
+                pw.Text(antimbaki.abs().toStringAsFixed(2), style: mrStyle(bold: true)),
               ]),
               pw.SizedBox(height: 30),
-              pw.Center(child: pw.Text("* Thank you for playing *", style: const pw.TextStyle(color: PdfColors.grey, fontSize: 10))),
+              pw.Center(child: pw.Text("* खेळल्याबद्दल धन्यवाद * Thank you for playing *", style: mrStyle(color: PdfColors.grey, fontSize: 10))),
             ],
           );
         },
@@ -2024,18 +2056,23 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                 final double payment = data['status'] == 'won'
                     ? (data['potentialWin'] as num?)?.toDouble() ?? 0.0
                     : 0.0;
+                // Winning = potentialWin for ALL bets (won + pending)
+                final double winning = (data['potentialWin'] as num?)?.toDouble() ?? 0.0;
 
-                gameStats.putIfAbsent(game, () => {'dhanda': 0.0, 'payment': 0.0});
+                gameStats.putIfAbsent(game, () => {'dhanda': 0.0, 'payment': 0.0, 'winning': 0.0});
                 gameStats[game]!['dhanda'] = gameStats[game]!['dhanda']! + amount;
                 gameStats[game]!['payment'] = gameStats[game]!['payment']! + payment;
+                gameStats[game]!['winning'] = gameStats[game]!['winning']! + winning;
               }
 
               // --- Totals ---
               double totalDhanda = 0;
               double totalPayment = 0;
+              double totalWinning = 0;
               gameStats.forEach((_, v) {
                 totalDhanda += v['dhanda']!;
                 totalPayment += v['payment']!;
+                totalWinning += v['winning']!;
               });
 
               final double commission = totalDhanda * commissionRate;
@@ -2189,6 +2226,28 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                         _buildCalcRow(t('total'), totalDhanda, totalPayment, isBold: true),
                         _buildCalcRow('कमिशन (${commissionPct.toStringAsFixed(0)}%)', commission, null),
                         _buildCalcRow(t('total'), netDhanda, totalPayment, isBold: true),
+
+                        // ---- WINNING AMOUNT ROW ----
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.shade50,
+                            border: Border.all(color: Colors.purple.shade300, width: 1.5),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('🏆 Winning Amount', style: TextStyle(color: Colors.purple, fontWeight: FontWeight.bold, fontSize: 15)),
+                              Text(
+                                '₹ ${totalWinning.toStringAsFixed(0)}',
+                                style: const TextStyle(color: Colors.purple, fontWeight: FontWeight.bold, fontSize: 17),
+                              ),
+                            ],
+                          ),
+                        ),
 
                         const SizedBox(height: 12),
 
