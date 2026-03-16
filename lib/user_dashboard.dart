@@ -1183,9 +1183,9 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
         // 0 से शुरू या सिर्फ 0 — ERROR दो, skip नहीं
         // Single digit "0" → invalid
         if (type == 'Single Digit' && processedNumStr == '0') {
-          return; // caller in _parseBets will add error because preCount == finalBets.length
+          return;
         }
-        // Panna 0 से शुरू (012, 045 etc.) → INVALID (matka mein 0-start panna nahi hota)
+        // Panna 0 से शुरू (012, 045 etc.) → INVALID
         if ((type == 'Single Panna' || type == 'Double Panna' || type == 'Triple Panna') && processedNumStr.startsWith('0')) {
           return;
         }
@@ -1269,7 +1269,7 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     }).toList();
   }
 
-  // FIX BUG 3: Matka standard - zeros at end (290 not 029, 100 not 001)
+  // Matka standard - zeros at end (290 not 029, 100 not 001)
   String _matkaSortPanna(List<int> digits) {
     List<int> nonZero = digits.where((d) => d != 0).toList()..sort();
     List<int> zeros = List.filled(digits.where((d) => d == 0).length, 0);
@@ -1831,19 +1831,19 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                 child: pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text("बाकी BAKI", style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14)),
-                    pw.Text(baki.toStringAsFixed(2), style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14)),
+                    pw.Text(baki >= 0 ? "बाकी (BAKI)" : "जमा (JAMA)", style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14)),
+                    pw.Text(baki.abs().toStringAsFixed(2), style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 14)),
                   ],
                 ),
               ),
               pw.SizedBox(height: 10),
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("मागील जमा (Prev Balance)"), pw.Text(maagilJama.toStringAsFixed(2))]),
               pw.SizedBox(height: 4),
-              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("आजचे जमा (Today Baki)"), pw.Text(baki.toStringAsFixed(2))]),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text(baki >= 0 ? "आजची बाकी (Today Baki)" : "आजची जमा (Today Jama)"), pw.Text(baki.abs().toStringAsFixed(2))]),
               pw.SizedBox(height: 4),
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-                pw.Text("एकूण बाकी (Total)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                pw.Text(ekunBaki.toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text(ekunBaki >= 0 ? "एकूण बाकी (Total Baki)" : "एकूण जमा (Total Jama)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text(ekunBaki.abs().toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
               ]),
               pw.SizedBox(height: 8),
               pw.Divider(),
@@ -1854,8 +1854,8 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text("वाटप (Paid to Agent)"), pw.Text(vatap.toStringAsFixed(0))]),
               pw.SizedBox(height: 6),
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-                pw.Text("अंतिम बाकी (Final Balance)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                pw.Text(antimbaki.toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text(antimbaki >= 0 ? "अंतिम बाकी (Final Baki)" : "अंतिम जमा (Final Jama)", style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text(antimbaki.abs().toStringAsFixed(2), style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
               ]),
               pw.SizedBox(height: 30),
               pw.Center(child: pw.Text("* Thank you for playing *", style: const pw.TextStyle(color: PdfColors.grey, fontSize: 10))),
@@ -1920,8 +1920,8 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
         if (userSnap.hasData && userSnap.data!.exists) {
           final uData = userSnap.data!.data() as Map<String, dynamic>;
           userName = uData['name'] ?? (uData['email'] as String?)?.split('@')[0] ?? 'User';
-          // 'balance' = admin ka manually maintained balance (outstanding dues)
-          thakbaki = (uData['balance'] as num?)?.toDouble() ?? 0.0;
+          // 'balance' field ab use nahi hoga thakbaki ke liye
+          // thakbaki dynamically calculate hogi previous bets se
           if (uData.containsKey('commission')) {
             commissionPct = (uData['commission'] as num).toDouble();
           }
@@ -1963,7 +1963,7 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
             ],
           ),
 
-          // ---- BETS REAL-TIME STREAM ----
+          // ---- BETS REAL-TIME STREAM (ALL bets — used for both thakbaki + today) ----
           body: StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('bets')
@@ -1977,17 +1977,41 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                 return const Center(child: CircularProgressIndicator(color: kPrimary));
               }
 
-              // Filter bets for selected date only
+              // Date range
               final selStart = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
               final selEnd = selStart.add(const Duration(days: 1));
 
-              final filteredDocs = snapshot.data!.docs.where((doc) {
+              // Split bets into: today vs before today
+              final filteredDocs = <QueryDocumentSnapshot>[]; // today's bets
+              double prevDhanda = 0.0; // bets before selected date
+              double prevWon    = 0.0;
+
+              for (final doc in snapshot.data!.docs) {
                 final data = doc.data() as Map<String, dynamic>;
                 final Timestamp? ts = data['timestamp'];
-                if (ts == null) return false;
+                if (ts == null) continue;
                 final dt = ts.toDate();
-                return dt.isAfter(selStart) && dt.isBefore(selEnd);
-              }).toList();
+
+                if (dt.isAfter(selStart) && dt.isBefore(selEnd)) {
+                  // Today's bets
+                  filteredDocs.add(doc);
+                } else if (dt.isBefore(selStart)) {
+                  // Before selected date — thakbaki ke liye
+                  final double amt = (data['amount'] as num?)?.toDouble() ?? 0.0;
+                  prevDhanda += amt;
+                  if (data['status'] == 'won') {
+                    prevWon += (data['potentialWin'] as num?)?.toDouble() ?? 0.0;
+                  }
+                }
+              }
+
+              // thakbaki = previous days ka net (dynamically computed)
+              // prevNetDhanda - prevWon = kitna agent ko admin ko DENA tha pehle
+              final double prevCommission = prevDhanda * commissionRate;
+              final double prevNetDhanda  = prevDhanda - prevCommission;
+              // thakbaki > 0 = agent ko admin ko pehle se DENA hai
+              // thakbaki < 0 = admin ko agent ko pehle se DENA hai (jeeta tha)
+              thakbaki = prevNetDhanda - prevWon;
 
               // --- Aggregate per game ---
               final Map<String, Map<String, double>> gameStats = {};
@@ -2027,8 +2051,12 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                     .where('userId', isEqualTo: uid)
                     .snapshots(),
                 builder: (context, txSnap) {
-                  double vasuli = 0.0; // Agent ne admin ko cash diya (type: 'deduct')
-                  double vatap = 0.0;  // Admin ne agent ko cash diya (type: 'add') — sirf manual payment
+                  double vasuli = 0.0; // Today: agent ne cash diya
+                  double vatap  = 0.0; // Today: admin ne win_paid/add diya
+
+                  // Previous days transactions — thakbaki adjustment ke liye
+                  double prevVasuli  = 0.0;
+                  double prevVatap   = 0.0;
 
                   if (txSnap.hasData) {
                     for (final doc in txSnap.data!.docs) {
@@ -2036,25 +2064,33 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                       final Timestamp? ts = d['timestamp'];
                       if (ts == null) continue;
                       final dt = ts.toDate();
-                      if (!dt.isAfter(selStart) || !dt.isBefore(selEnd)) continue;
-
                       final double amt = (d['amount'] as num?)?.toDouble() ?? 0.0;
                       final String type = d['type'] ?? '';
 
-                      if (type == 'deduct') {
-                        // Agent ne admin ko cash diya — vasuli
-                        vasuli += amt.abs();
-                      } else if (type == 'add') {
-                        // Admin ne agent ko cash diya — vatap (sirf manual payment)
-                        vatap += amt.abs();
+                      if (dt.isAfter(selStart) && dt.isBefore(selEnd)) {
+                        // Today's transactions
+                        if (type == 'deduct') {
+                          vasuli += amt.abs();
+                        } else if (type == 'win_paid' || type == 'add') {
+                          vatap += amt.abs();
+                        }
+                      } else if (dt.isBefore(selStart)) {
+                        // Previous days transactions — thakbaki adjust karo
+                        if (type == 'deduct') {
+                          prevVasuli += amt.abs(); // agent ne diya tha → thakbaki kam hoga
+                        } else if (type == 'win_paid' || type == 'add') {
+                          prevVatap += amt.abs();  // admin ne diya tha → thakbaki badhega
+                        }
                       }
-                      // 'win' type nahi hai — win sirf limit badhata hai, vasuli/vatap nahi
                     }
                   }
 
+                  // thakbaki = previous bets net - prev vasuli + prev vatap
+                  // (prev vasuli kam karta hai outstanding, prev vatap badhata hai)
+                  final double finalThakbaki = thakbaki - prevVasuli + prevVatap;
+
                   // अंतिम बाकी = थकबाकी + आजची बाकी - वसुली + वाटप
-                  // Logic: previous dues + today's net baki - what agent paid + what admin paid
-                  final double ekunBaki = thakbaki + aajchiBaki;
+                  final double ekunBaki  = finalThakbaki + aajchiBaki;
                   final double antimbaki = ekunBaki - vasuli + vatap;
 
                   // ---- EMPTY STATE ----
@@ -2156,7 +2192,9 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
 
                         const SizedBox(height: 12),
 
-                        // ---- आजची बाकी (BAKI) — purple strip ----
+                        // ---- आजची बाकी/जमा — purple strip ----
+                        // aajchiBaki >= 0 → Agent ko Admin ko DENA hai → "बाकी"
+                        // aajchiBaki <  0 → Admin ko Agent ko DENA hai → "जमा" (agent jeeta)
                         Container(
                           width: double.infinity,
                           decoration: BoxDecoration(
@@ -2164,25 +2202,49 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          child: Column(
                             children: [
-                              Text(t('baki'), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                              Text(aajchiBaki.toStringAsFixed(2), style: TextStyle(
-                                color: aajchiBaki >= 0 ? Colors.greenAccent.shade100 : Colors.red.shade200,
-                                fontSize: 18, fontWeight: FontWeight.bold,
-                              )),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    aajchiBaki >= 0 ? t('baki') : 'जमा (Jama)',
+                                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                  ),
+                                  Text(
+                                    aajchiBaki.abs().toStringAsFixed(2),
+                                    style: TextStyle(
+                                      color: aajchiBaki >= 0 ? Colors.greenAccent.shade100 : Colors.yellowAccent,
+                                      fontSize: 18, fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  aajchiBaki >= 0
+                                      ? "Agent को Admin को देना है: ₹${aajchiBaki.toStringAsFixed(0)}"
+                                      : "Admin को Agent को देना है: ₹${aajchiBaki.abs().toStringAsFixed(0)}",
+                                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                ),
+                              ),
                             ],
                           ),
                         ),
 
                         const SizedBox(height: 12),
 
-                        // मागील जमा + आजचे जमा
-                        _buildFinalRow(t('prev_baki'), thakbaki, Colors.black87),
-                        _buildFinalRow(t('today_baki'), aajchiBaki, aajchiBaki >= 0 ? Colors.green.shade700 : Colors.red.shade700),
+                        // मागील जमा + आजचे बाकी/जमा
+                        _buildFinalRow(t('prev_baki'), finalThakbaki, Colors.black87),
+                        _buildFinalRow(
+                          aajchiBaki >= 0 ? 'आजची बाकी (Today Baki)' : 'आजची जमा (Today Jama)',
+                          aajchiBaki.abs(),
+                          aajchiBaki >= 0 ? Colors.green.shade700 : Colors.red.shade700,
+                        ),
 
-                        // एकूण बाकी box
+                        // एकूण बाकी / एकूण जमा box
                         const SizedBox(height: 4),
                         Container(
                           width: double.infinity,
@@ -2195,8 +2257,11 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(t('total_baki'), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87)),
-                              Text(ekunBaki.toStringAsFixed(2), style: TextStyle(
+                              Text(
+                                ekunBaki >= 0 ? 'एकूण बाकी (Total Baki)' : 'एकूण जमा (Total Jama)',
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.black87),
+                              ),
+                              Text(ekunBaki.abs().toStringAsFixed(2), style: TextStyle(
                                 fontSize: 17, fontWeight: FontWeight.bold,
                                 color: ekunBaki >= 0 ? Colors.green.shade800 : Colors.red.shade800,
                               )),
@@ -2208,7 +2273,7 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                         const Divider(color: Colors.black12, thickness: 1),
 
                         // ---- थकबाकी (outstanding) ----
-                        _buildFinalRow(t('outstanding'), thakbaki, Colors.black87),
+                        _buildFinalRow(t('outstanding'), finalThakbaki, Colors.black87),
 
                         // ---- वसुली / वाटप — GREEN background ----
                         const SizedBox(height: 8),
@@ -2258,8 +2323,12 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
 
                         const SizedBox(height: 10),
 
-                        // ---- अंतिम बाकी ----
-                        _buildFinalRow(t('final_baki'), antimbaki, antimbaki >= 0 ? Colors.green.shade800 : Colors.red.shade800),
+                        // ---- अंतिम बाकी / अंतिम जमा ----
+                        _buildFinalRow(
+                          antimbaki >= 0 ? t('final_baki') : 'अंतिम जमा (Final Jama)',
+                          antimbaki.abs(),
+                          antimbaki >= 0 ? Colors.green.shade800 : Colors.red.shade800,
+                        ),
 
                         // Pending bets notice
                         if (filteredDocs.any((d) => (d.data() as Map<String, dynamic>)['status'] == 'pending')) ...[
@@ -2309,7 +2378,7 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                               totalPayment: totalPayment,
                               commission: commission,
                               baki: aajchiBaki,
-                              maagilJama: thakbaki,
+                              maagilJama: finalThakbaki,
                               ekunBaki: ekunBaki,
                               userName: userName,
                               commissionPct: commissionPct,
@@ -2390,20 +2459,10 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
             fontWeight: isBold ? FontWeight.bold : FontWeight.normal
           )),
           if (betAmount != null)
-            // Image format: "betAmount.00 = Rs.winAmount" - betAmount on left, winAmount on right
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  betAmount.toStringAsFixed(2),
-                  style: const TextStyle(fontSize: 16, color: Color(0xFFD32F2F), fontWeight: FontWeight.w500),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  "= Rs.${amount.toStringAsFixed(0)}",
-                  style: const TextStyle(fontSize: 15, color: Colors.black54),
-                ),
-              ],
+            // Sirf WIN amount dikhao — bet amount nahi
+            Text(
+              amount > 0 ? "= Rs.${amount.toStringAsFixed(0)}" : "= Rs.0",
+              style: const TextStyle(fontSize: 15, color: Colors.black54),
             )
           else
             Text(
@@ -2677,12 +2736,16 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text("बाकी (Baki)", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: baki >= 0 ? Colors.green.shade800 : Colors.red.shade800)),
-                              Text(baki.toStringAsFixed(2), style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: baki >= 0 ? Colors.green.shade800 : Colors.red.shade800)),
+                              Text(baki.abs().toStringAsFixed(2), style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: baki >= 0 ? Colors.green.shade800 : Colors.red.shade800)),
                             ],
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            baki >= 0 ? "Admin को देना है: ₹${baki.toStringAsFixed(2)}" : "Admin से लेना है: ₹${baki.abs().toStringAsFixed(2)}",
+                            // baki > 0 = agent ka dhanda zyada — AGENT ko ADMIN ko dena hai
+                            // baki < 0 = agent jeeta — ADMIN ko AGENT ko dena hai
+                            baki >= 0
+                                ? "Agent को Admin को देना है: ₹${baki.toStringAsFixed(2)}"
+                                : "Admin को Agent को देना है: ₹${baki.abs().toStringAsFixed(2)}",
                             style: TextStyle(fontSize: 12, color: baki >= 0 ? Colors.green.shade700 : Colors.red.shade700),
                           ),
                         ],

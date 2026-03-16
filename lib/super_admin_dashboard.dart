@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:trade_mark/market_management.dart';
 
 import 'manage_admin.dart'; // NEW IMPORT FOR ADMIN PERMISSIONS
 import 'user_bid_manage.dart'; // NEW IMPORT FOR USER BIDS
@@ -101,7 +102,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     final List<Widget> pages = [
       SuperAdminHomePage(onTabSelected: _switchTab), 
       const SuperAdminMarketTab(), 
-      const SuperAdminGameManagementPage(), 
+      const MarketManagePage(), 
       const SuperAdminPeoplePage(), 
       const SuperAdminSlipPage(),         
       const SuperAdminManualPanelPage(),    
@@ -1210,219 +1211,6 @@ class _SuperAdminGameLedgerScreenState extends State<SuperAdminGameLedgerScreen>
             ],
           );
         }
-      ),
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// 4. SUPER ADMIN GAME MANAGEMENT (With Winning Logic)
-// -----------------------------------------------------------------------------
-class SuperAdminGameManagementPage extends StatelessWidget {
-  const SuperAdminGameManagementPage({super.key});
-
-  void _showAddGameDialog(BuildContext context) {
-    final nameCtrl = TextEditingController();
-    showDialog(context: context, builder: (context) => AlertDialog(
-      backgroundColor: Colors.white, title: const Text("नवीन मार्केट जोडा", style: TextStyle(color: kTextMain)),
-      content: TextField(controller: nameCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "मार्केटचे नाव", labelStyle: TextStyle(color: kTextGrey))),
-      actions: [
-        TextButton(onPressed: ()=> Navigator.pop(context), child: const Text("रद्द करा")),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: kSuccess, foregroundColor: Colors.white),
-          onPressed: () {
-            if (nameCtrl.text.isNotEmpty) {
-              FirebaseFirestore.instance.collection('games').add({
-                'name': nameCtrl.text.toUpperCase(),
-                'openBetStart': "09:00 AM", 'openBetEnd': "11:00 AM",
-                'closeBetStart': "12:00 PM", 'closeBetEnd': "02:00 PM",
-                'openTime': "11:30 AM", 'closeTime': "02:30 PM",
-                'result': '***-**-***', 'isClosed': false,
-                'order': DateTime.now().millisecondsSinceEpoch,
-              });
-              Navigator.pop(context);
-            }
-          }, child: const Text("तयार करा")
-        )
-      ],
-    ));
-  }
-
-  // --- SMART WINNING LOGIC (MAHARASHTRA MATKA FORMAT) ---
-  Future<void> _updateResultAndProcessWins(BuildContext context, String docId, String gameName, String resultText) async {
-    try {
-      // 1. Update the result string in DB
-      await FirebaseFirestore.instance.collection('games').doc(docId).update({'result': resultText});
-
-      // 2. Parse the result format: openPanna-openSingleCloseSingle-closePanna (e.g. 123-45-678)
-      // * means that part is not yet declared - strip them out
-      String openPanna = "";
-      String openSingle = "";
-      String closeSingle = "";
-      String closePanna = "";
-      String jodi = "";
-
-      List<String> parts = resultText.trim().split('-');
-      if (parts.length >= 1) {
-        openPanna = parts[0].replaceAll('*', '').trim();
-      }
-      if (parts.length >= 2) {
-        String mid = parts[1].replaceAll('*', '').trim();
-        if (mid.length == 1) openSingle = mid;
-        if (mid.length == 2) {
-          openSingle = mid[0];
-          closeSingle = mid[1];
-          jodi = mid;
-        }
-      }
-      if (parts.length >= 3) {
-        closePanna = parts[2].replaceAll('*', '').trim();
-      }
-
-      // 3. Fetch all pending bets for this game
-      var betsQuery = await FirebaseFirestore.instance.collection('bets')
-          .where('gameId', isEqualTo: docId)
-          .where('status', isEqualTo: 'pending')
-          .get();
-
-      int processedCount = 0;
-
-      for (var betDoc in betsQuery.docs) {
-        var bet = betDoc.data();
-        String type = bet['betType']?.toString() ?? '';
-        String session = bet['session']?.toString() ?? 'Open';
-        String num = bet['number']?.toString() ?? '';
-        String userId = bet['userId']?.toString() ?? '';
-        int winAmount = int.tryParse(bet['potentialWin']?.toString() ?? '') ?? 0;
-
-        bool isDecided = false;
-        bool isWon = false;
-
-        // Check Open Session Bets
-        if (session == 'Open') {
-          if (type.contains('Panna') && openPanna.isNotEmpty) {
-            isDecided = true;
-            isWon = (num == openPanna);
-          } else if (type == 'Single Digit' && openSingle.isNotEmpty) {
-            isDecided = true;
-            isWon = (num == openSingle);
-          }
-        } 
-        // Check Close Session Bets
-        else if (session == 'Close') {
-          if (type.contains('Panna') && closePanna.isNotEmpty) {
-            isDecided = true;
-            isWon = (num == closePanna);
-          } else if (type == 'Single Digit' && closeSingle.isNotEmpty) {
-            isDecided = true;
-            isWon = (num == closeSingle);
-          }
-        }
-        
-        // Check Jodi Bets — only when both open & close results are available
-        if (type == 'Jodi Digit' && jodi.isNotEmpty && jodi.length == 2) {
-          isDecided = true;
-          isWon = (num == jodi);
-        }
-
-        // Apply Wallet Update & Change Status
-        if (isDecided) {
-          processedCount++;
-          await FirebaseFirestore.instance.runTransaction((tx) async {
-            if (isWon) {
-              DocumentReference userRef = FirebaseFirestore.instance.collection('users').doc(userId);
-              DocumentSnapshot userSnap = await tx.get(userRef);
-              
-              if (userSnap.exists) {
-                var uMap = userSnap.data() as Map<String, dynamic>;
-                // limit = game khelne ke liye — win pe badhao taaki aur khel sake
-                // balance = admin ka manual cash ledger — BILKUL MAT CHHUAO
-                int currentLimit = int.tryParse(uMap['limit']?.toString() ?? '') ?? 0;
-                tx.update(userRef, {
-                  'limit': currentLimit + winAmount,
-                });
-              }
-            }
-            tx.update(betDoc.reference, {'status': isWon ? 'won' : 'loss'});
-          });
-        }
-      }
-
-      if (context.mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("निकाल अपडेट झाला आणि $processedCount बेट्स रिझॉल्व्ह झाल्या! (Wins/Loss Processed)"), backgroundColor: Colors.green));
-      }
-    } catch (e) {
-      if (context.mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error processing wins: $e"), backgroundColor: Colors.red));
-      }
-    }
-  }
-
-  void _showUpdateResultDialog(BuildContext context, String docId, String gameName, String currentResult) {
-    final resCtrl = TextEditingController(text: currentResult.contains('*') ? '' : currentResult);
-    bool isProcessing = false;
-
-    showDialog(context: context, builder: (ctx) => StatefulBuilder(
-      builder: (context, setStateBuilder) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          title: Text("निकाल अपडेट करा: $gameName", style: const TextStyle(color: kTextMain)),
-          content: TextField(controller: resCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(hintText: "123-45-678", hintStyle: TextStyle(color: Colors.grey))),
-          actions: [
-            TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("रद्द करा", style: TextStyle(color: Colors.grey))),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: kSuccess, foregroundColor: Colors.white),
-              onPressed: isProcessing ? null : () async {
-                 setStateBuilder(() => isProcessing = true);
-                 await _updateResultAndProcessWins(ctx, docId, gameName, resCtrl.text.trim());
-                 if (ctx.mounted) Navigator.pop(ctx);
-              }, 
-              child: isProcessing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text("अपडेट करा")
-            )
-          ],
-        );
-      }
-    ));
-  }
-
-  void _showEditTimingsSheet(BuildContext context, String docId, Map<String, dynamic> data) {
-    showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) => EditTimingsDialog(docId: docId, data: data));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kAdminBg,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showAddGameDialog(context),
-        label: const Text('नवीन मार्केट'), icon: const Icon(Icons.add), backgroundColor: kPrimary, foregroundColor: Colors.white,
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('games').orderBy('order').snapshots(),
-        builder: (context, snapshot) {
-           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: kPrimary));
-           return ListView.separated(
-             itemCount: snapshot.data!.docs.length,
-             separatorBuilder: (_,__) => const Divider(height: 1, color: Colors.black12),
-             itemBuilder: (context, index) {
-               var doc = snapshot.data!.docs[index];
-               var data = doc.data() as Map<String, dynamic>;
-               return ListTile(
-                 tileColor: Colors.white,
-                 title: Text(data['name'], style: const TextStyle(color: kTextMain, fontWeight: FontWeight.bold)),
-                 subtitle: Text("निकाल: ${data['result'] ?? '***-**-***'}\nओपन: ${data['openTime']} | क्लोज: ${data['closeTime']}", style: const TextStyle(color: kTextGrey)),
-                 trailing: Row(
-                   mainAxisSize: MainAxisSize.min,
-                   children: [
-                     Switch(value: !(data['isClosed'] == true), activeColor: kSuccess, onChanged: (val) => FirebaseFirestore.instance.collection('games').doc(doc.id).update({'isClosed': !val})),
-                     IconButton(icon: const Icon(Icons.access_time, color: Colors.orange), onPressed: () => _showEditTimingsSheet(context, doc.id, data)),
-                     IconButton(icon: const Icon(Icons.edit_note, color: Colors.blue), onPressed: () => _showUpdateResultDialog(context, doc.id, data['name'], data['result'] ?? '***-**-***'))
-                   ],
-                 ),
-               );
-             },
-           );
-        },
       ),
     );
   }
@@ -2553,6 +2341,7 @@ class _SuperAdminPaymentPageState extends State<SuperAdminPaymentPage> {
     final balCtrl = TextEditingController();
     final noteCtrl = TextEditingController();
     bool isSubmitting = false;
+    bool isWinPayment = false;
 
     showDialog(
       context: context,
@@ -2567,6 +2356,26 @@ class _SuperAdminPaymentPageState extends State<SuperAdminPaymentPage> {
                 Text("सध्याचा बॅलन्स (Current Balance): ₹$currentBalance", style: const TextStyle(color: kSuccess, fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 15),
                 TextField(controller: balCtrl, keyboardType: const TextInputType.numberWithOptions(signed: true), style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "Amount (+ for add, - for deduct)", border: OutlineInputBorder(), labelStyle: TextStyle(color: kTextGrey))),
+                const SizedBox(height: 12),
+                // WIN PAYMENT TOGGLE
+                Container(
+                  decoration: BoxDecoration(
+                    color: isWinPayment ? Colors.green.shade50 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isWinPayment ? Colors.green.shade400 : Colors.grey.shade300),
+                  ),
+                  child: CheckboxListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                    value: isWinPayment,
+                    onChanged: (v) => setStateBuilder(() => isWinPayment = v ?? false),
+                    title: Text("Win Amount Payment", style: TextStyle(color: isWinPayment ? Colors.green.shade800 : kTextGrey, fontWeight: FontWeight.bold, fontSize: 13)),
+                    subtitle: Text(
+                      isWinPayment ? "✅ Agent ki slip mein VATAP mein dikhega" : "Agent jeeta — Admin ab paisa de raha hai",
+                      style: TextStyle(color: isWinPayment ? Colors.green.shade700 : kTextGrey, fontSize: 11),
+                    ),
+                    activeColor: Colors.green,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 TextField(controller: noteCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "Note/Remark (Optional)", border: OutlineInputBorder(), labelStyle: TextStyle(color: kTextGrey))),
               ],
@@ -2585,18 +2394,39 @@ class _SuperAdminPaymentPageState extends State<SuperAdminPaymentPage> {
                         DocumentSnapshot userSnap = await transaction.get(userRef);
                         int currentBal = int.tryParse((userSnap.data() as Map<String, dynamic>)['balance']?.toString() ?? '') ?? 0;
                         int newBal = currentBal + val;
-                        transaction.update(userRef, {'balance': newBal}); 
+                        transaction.update(userRef, {'balance': newBal});
+
+                        // Transaction type:
+                        // 'win_paid' = admin ne WIN ka paisa diya → Vatap mein dikhega slip mein
+                        // 'add'      = normal balance add → Vatap mein NAHI
+                        // 'deduct'   = agent ne cash diya → Vasuli mein dikhega
+                        String txType;
+                        if (val < 0) {
+                          txType = 'deduct';
+                        } else if (isWinPayment) {
+                          txType = 'win_paid';
+                        } else {
+                          txType = 'add';
+                        }
+
                         transaction.set(FirebaseFirestore.instance.collection('transactions').doc(), {
-                           'userId': docId, 'amount': val, 'type': val > 0 ? 'add' : 'deduct',
+                           'userId': docId, 'amount': val, 'type': txType,
                            'previousBalance': currentBal, 'newBalance': newBal,
-                           'timestamp': FieldValue.serverTimestamp(), 'adminId': FirebaseAuth.instance.currentUser?.uid ?? "", 'note': noteCtrl.text.trim(),
+                           'timestamp': FieldValue.serverTimestamp(),
+                           'adminId': FirebaseAuth.instance.currentUser?.uid ?? "",
+                           'note': noteCtrl.text.trim(),
                         });
                       });
-                      Navigator.pop(ctx); 
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Payment Updated!", style: TextStyle(color: Colors.white)), backgroundColor: Colors.green));
+                      Navigator.pop(ctx);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(isWinPayment ? "Win Payment diya! Agent ki slip mein Vatap update ho gaya." : "Payment Updated!"),
+                          backgroundColor: Colors.green,
+                        ));
+                      }
                     } catch(e) {
                        setStateBuilder(() => isSubmitting = false);
-                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+                       if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
                     }
                   }
                 },
@@ -2673,7 +2503,7 @@ class _SuperAdminPaymentPageState extends State<SuperAdminPaymentPage> {
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         title: Text(displayName, style: const TextStyle(color: kTextMain, fontWeight: FontWeight.bold, fontSize: 16)),
-                        subtitle: Text("Balance: ₹$balance", style: TextStyle(color: balance >= 0 ? kSuccess : kAccent, fontWeight: FontWeight.bold)),
+                        subtitle: Text("Balance: ₹$balance", style: TextStyle(color: balance >= 0 ? kAccent : kSuccess, fontWeight: FontWeight.bold)),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -3031,7 +2861,7 @@ class _SuperAdminJamaNaaveReceiptPageState extends State<SuperAdminJamaNaaveRece
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
                 
-                double yene = 0, dene = 0;
+                double dene = 0, yene = 0;
                 List<Map<String, dynamic>> userList = [];
 
                 for (var doc in snapshot.data!.docs) {
@@ -3039,9 +2869,15 @@ class _SuperAdminJamaNaaveReceiptPageState extends State<SuperAdminJamaNaaveRece
                   if(_selectedAdminId != null && data['createdBy'] != _selectedAdminId) continue;
 
                   double bal = double.tryParse(data['balance']?.toString() ?? '') ?? 0.0;
-                  userList.add({'name': data['name'] ?? data['email']?.toString().split('@')[0] ?? 'Unknown', 'balance': bal, 'status': data['approved']==true ? 'Active' : 'Deactive'});
-                  if (bal > 0) yene += bal;
-                  if (bal < 0) dene += bal;
+                  userList.add({
+                    'id': doc.id,
+                    'name': data['name'] ?? data['email']?.toString().split('@')[0] ?? 'Unknown',
+                    'balance': bal,
+                    'commission': (data['commission'] as num?)?.toDouble() ?? 10.0,
+                    'status': data['approved']==true ? 'Active' : 'Deactive',
+                  });
+                  if (bal > 0) dene += bal;
+                  if (bal < 0) yene += bal.abs();
                 }
 
                 return Column(
@@ -3053,8 +2889,18 @@ class _SuperAdminJamaNaaveReceiptPageState extends State<SuperAdminJamaNaaveRece
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text("Dene Balance", style: TextStyle(color: kTextGrey, fontWeight: FontWeight.bold)), Text(dene.toStringAsFixed(2), style: const TextStyle(color: Colors.red, fontSize: 18, fontWeight: FontWeight.bold))]),
-                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [const Text("Yene Balance", style: TextStyle(color: kTextGrey, fontWeight: FontWeight.bold)), Text(yene.toStringAsFixed(2), style: const TextStyle(color: Colors.green, fontSize: 18, fontWeight: FontWeight.bold))]),
+                              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Text("Dene Balance", style: TextStyle(color: kTextGrey, fontWeight: FontWeight.bold)),
+                                const Text("(Admin ko agent ko dena hai)", style: TextStyle(color: kTextGrey, fontSize: 11)),
+                                // RED — admin ko dena padega
+                                Text(dene.toStringAsFixed(2), style: const TextStyle(color: Colors.red, fontSize: 18, fontWeight: FontWeight.bold)),
+                              ]),
+                              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                                const Text("Yene Balance", style: TextStyle(color: kTextGrey, fontWeight: FontWeight.bold)),
+                                const Text("(Admin ko agent se lena hai)", style: TextStyle(color: kTextGrey, fontSize: 11)),
+                                // GREEN — admin ko milega
+                                Text(yene.toStringAsFixed(2), style: const TextStyle(color: Colors.green, fontSize: 18, fontWeight: FontWeight.bold)),
+                              ]),
                             ],
                           ),
                           const SizedBox(height: 16),
@@ -3090,11 +2936,29 @@ class _SuperAdminJamaNaaveReceiptPageState extends State<SuperAdminJamaNaaveRece
                         ],
                       ),
                     ),
+                    // Info Banner
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      color: Colors.amber.shade50,
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline, color: Colors.orange, size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "Balance = Agent ka net outstanding (bets se dynamically computed). "
+                              "Win payment dene ke baad Payment page se 'Win Amount Payment' ON karke submit karo.",
+                              style: TextStyle(color: Colors.orange.shade800, fontSize: 11),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     Container(
                       color: kPrimary.withOpacity(0.1),
                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                      child: Row(
-                        children: const [
+                      child: const Row(
+                        children: [
                            SizedBox(width: 40, child: Text("Sr No", style: TextStyle(fontWeight: FontWeight.bold, color: kTextMain))),
                            Expanded(flex: 2, child: Text("Name", style: TextStyle(fontWeight: FontWeight.bold, color: kTextMain))),
                            Expanded(flex: 1, child: Text("Balance", style: TextStyle(fontWeight: FontWeight.bold, color: kTextMain))),
@@ -3110,16 +2974,10 @@ class _SuperAdminJamaNaaveReceiptPageState extends State<SuperAdminJamaNaaveRece
                           separatorBuilder: (_,__) => const Divider(height: 1, color: Colors.black12),
                           itemBuilder: (context, index) {
                             var u = userList[index];
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                              child: Row(
-                                children: [
-                                   SizedBox(width: 40, child: Text("${index + 1}", style: const TextStyle(color: kTextGrey))),
-                                   Expanded(flex: 2, child: Text(u['name'], style: const TextStyle(color: kTextMain))),
-                                   Expanded(flex: 1, child: Text(u['balance'].toStringAsFixed(2), style: TextStyle(color: (u['balance'] as num) >= 0 ? Colors.green : Colors.red, fontWeight: FontWeight.bold))),
-                                   Expanded(flex: 1, child: Text(u['status'], style: TextStyle(color: u['status'] == 'Active' ? Colors.green : Colors.red))),
-                                ],
-                              ),
+                            return _SuperAdminAgentBalanceRow(
+                              index: index,
+                              userData: u,
+                              userId: u['id']?.toString() ?? '',
                             );
                           },
                         ),
@@ -3132,6 +2990,140 @@ class _SuperAdminJamaNaaveReceiptPageState extends State<SuperAdminJamaNaaveRece
           )
         ],
       )
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// SUPER ADMIN AGENT BALANCE ROW — Dynamic per-agent net balance
+// Formula:
+//   pendingWin    = totalWon - totalWinPaid - totalManualAdd
+//   pendingDhanda = netDhanda - totalVasuli
+//   net           = pendingDhanda - pendingWin
+//     net > 0 → Admin ko LENA (Yene GREEN)
+//     net < 0 → Admin ko DENA (Dene RED)
+// -----------------------------------------------------------------------------
+class _SuperAdminAgentBalanceRow extends StatelessWidget {
+  final int index;
+  final Map<String, dynamic> userData;
+  final String userId;
+
+  const _SuperAdminAgentBalanceRow({
+    required this.index,
+    required this.userData,
+    required this.userId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final double commissionPct = (userData['commission'] as num?)?.toDouble() ?? 10.0;
+    final String name = userData['name']?.toString() ?? 'Unknown';
+    final String status = userData['status']?.toString() ?? 'Active';
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('bets')
+          .where('userId', isEqualTo: userId)
+          .snapshots(),
+      builder: (context, betsSnap) {
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('transactions')
+              .where('userId', isEqualTo: userId)
+              .snapshots(),
+          builder: (context, txSnap) {
+            double totalDhanda = 0.0;
+            double totalWon    = 0.0;
+
+            if (betsSnap.hasData) {
+              for (final doc in betsSnap.data!.docs) {
+                final d = doc.data() as Map<String, dynamic>;
+                totalDhanda += (d['amount'] as num?)?.toDouble() ?? 0.0;
+                if (d['status'] == 'won') {
+                  totalWon += (d['potentialWin'] as num?)?.toDouble() ?? 0.0;
+                }
+              }
+            }
+
+            final double commission    = totalDhanda * (commissionPct / 100.0);
+            final double netDhanda     = totalDhanda - commission;
+
+            double totalVasuli    = 0.0;
+            double totalWinPaid   = 0.0;
+            double totalManualAdd = 0.0;
+
+            if (txSnap.hasData) {
+              for (final doc in txSnap.data!.docs) {
+                final d = doc.data() as Map<String, dynamic>;
+                final String type = d['type'] ?? '';
+                final double amt = ((d['amount'] as num?)?.toDouble() ?? 0.0).abs();
+                if (type == 'deduct')   totalVasuli    += amt;
+                if (type == 'win_paid') totalWinPaid   += amt;
+                if (type == 'add')      totalManualAdd += amt;
+              }
+            }
+
+            final double pendingWin    = totalWon - totalWinPaid - totalManualAdd;
+            final double pendingDhanda = netDhanda - totalVasuli;
+            final double net           = pendingDhanda - pendingWin;
+
+            final bool adminKoLena = net > 0;
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+              child: Row(
+                children: [
+                  SizedBox(width: 40, child: Text("${index + 1}", style: const TextStyle(color: kTextGrey))),
+                  Expanded(
+                    flex: 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: const TextStyle(color: kTextMain, fontWeight: FontWeight.bold)),
+                        if (pendingWin > 0)
+                          Text(
+                            "Win Pending: ₹${pendingWin.toStringAsFixed(0)}",
+                            style: const TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 1,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "₹${net.abs().toStringAsFixed(0)}",
+                          style: TextStyle(
+                            color: net == 0 ? Colors.grey : (adminKoLena ? kSuccess : kAccent),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                        Text(
+                          net == 0 ? "Clear" : (adminKoLena ? "Lena" : "Dena"),
+                          style: TextStyle(
+                            color: net == 0 ? Colors.grey : (adminKoLena ? kSuccess : kAccent),
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 1,
+                    child: Text(
+                      status,
+                      style: TextStyle(color: status == 'Active' ? kSuccess : kAccent, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
