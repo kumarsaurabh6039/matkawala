@@ -102,7 +102,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
     final List<Widget> pages = [
       SuperAdminHomePage(onTabSelected: _switchTab), 
       const SuperAdminMarketTab(), 
-      const MarketManagePage(), 
+      const MarketManagePage(isSuperAdmin: true), 
       const SuperAdminPeoplePage(), 
       const SuperAdminSlipPage(),         
       const SuperAdminManualPanelPage(),    
@@ -564,7 +564,7 @@ class _SuperAdminPeoplePageState extends State<SuperAdminPeoplePage> with Single
     final emailCtrl = TextEditingController(text: isEdit ? originalEmail : "");
     final passCtrl = TextEditingController(text: isEdit ? (safeData['password'] ?? "") : "");
     final limitCtrl = TextEditingController(text: isEdit ? (safeData['limit']?.toString() ?? "0") : "0"); 
-    final commCtrl = TextEditingController(text: isEdit ? (safeData['commission']?.toString() ?? "10") : "10"); 
+    final commCtrl = TextEditingController(text: isEdit ? (safeData['commission']?.toString() ?? "0") : "0"); 
     
     // SP, DP, TP, Single, Jodi Rates
     final spRateCtrl = TextEditingController(text: isEdit ? (safeData['spRate']?.toString() ?? safeData['panelRate']?.toString() ?? "160") : "160"); 
@@ -620,7 +620,7 @@ class _SuperAdminPeoplePageState extends State<SuperAdminPeoplePage> with Single
                   TextField(controller: nameCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "नाव (Name)", labelStyle: TextStyle(color: kTextGrey))),
                   TextField(controller: phoneCtrl, keyboardType: TextInputType.phone, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "मोबाईल नंबर", labelStyle: TextStyle(color: kTextGrey))),
                   if(!isEdit) TextField(controller: emailCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "लॉगिन आयडी (Username)", labelStyle: TextStyle(color: kTextGrey))),
-                  TextField(controller: passCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "पासवर्ड (Password)", labelStyle: TextStyle(color: kTextGrey))),
+                  TextField(controller: passCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "पासवर्ड (Password)", labelStyle: TextStyle(color: kTextGrey), hintText: "कोणतेही 6+ अक्षरे / numbers", hintStyle: TextStyle(color: Colors.grey, fontSize: 12))),
                   
                   const SizedBox(height: 20),
                   const Text("सेटिंग्ज आणि रेट्स (Settings & Rates)", style: TextStyle(color: kPrimary, fontWeight: FontWeight.bold)),
@@ -683,6 +683,14 @@ class _SuperAdminPeoplePageState extends State<SuperAdminPeoplePage> with Single
                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("कृपया ॲडमिन निवडा! (Select Admin)")));
                    return;
                 }
+                // Password validation — min 6 chars, no @ required
+                String pass = passCtrl.text.trim();
+                if (pass.length < 6) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("पासवर्ड कमीत कमी 6 अक्षरांचा असावा! (Min. 6 characters)"), backgroundColor: Colors.red)
+                  );
+                  return;
+                }
                 Navigator.pop(ctx);
                 
                 String inputId = emailCtrl.text.trim().toLowerCase().replaceAll(' ', '');
@@ -691,7 +699,7 @@ class _SuperAdminPeoplePageState extends State<SuperAdminPeoplePage> with Single
                 Map<String, dynamic> updateData = {
                   'name': nameCtrl.text,
                   'phone': phoneCtrl.text,
-                  'password': passCtrl.text,
+                  'password': pass,
                   'limit': int.tryParse(limitCtrl.text) ?? 0,
                   'showLimitToUser': showLimit, 
                   'spRate': int.tryParse(spRateCtrl.text) ?? 160,     
@@ -700,18 +708,20 @@ class _SuperAdminPeoplePageState extends State<SuperAdminPeoplePage> with Single
                   'singleRate': int.tryParse(singleRateCtrl.text) ?? 10,
                   'jodiRate': int.tryParse(jodiRateCtrl.text) ?? 100,
                   'panelRate': int.tryParse(spRateCtrl.text) ?? 160,
-                  'commission': int.tryParse(commCtrl.text) ?? 10,
+                  'commission': int.tryParse(commCtrl.text) ?? 0,
                   'approved': isActive,
                   'createdBy': selectedAdminId, 
                 };
 
                 if (isEdit) {
-                   await FirebaseFirestore.instance.collection('users').doc(docId).update(updateData);
-                   if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("अपडेट केले! (Updated)"), backgroundColor: Colors.green));
+                  // Firebase Auth password bhi update karo
+                  await _updateAgentAuthPassword(context, docId!, pass);
+                  await FirebaseFirestore.instance.collection('users').doc(docId).update(updateData);
+                  if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("अपडेट केले! (Updated)"), backgroundColor: Colors.green));
                 } else {
-                   updateData['role'] = 'user';
-                   updateData['balance'] = 0;
-                   await _registerAuthUser(context, updateData, finalEmail, passCtrl.text);
+                  updateData['role'] = 'user';
+                  updateData['balance'] = 0;
+                  await _registerAuthUser(context, updateData, finalEmail, pass);
                 }
               }, 
               child: Text(isEdit ? "अपडेट करा" : "सेव्ह करा")
@@ -770,6 +780,35 @@ class _SuperAdminPeoplePageState extends State<SuperAdminPeoplePage> with Single
         ],
       )
     );
+  }
+
+  // Firebase Auth password update (Edit ke liye)
+  Future<void> _updateAgentAuthPassword(BuildContext context, String userId, String newPassword) async {
+    FirebaseApp? tempApp;
+    try {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      if (!userDoc.exists) return;
+      final userData = userDoc.data() as Map<String, dynamic>;
+      final email = userData['email']?.toString() ?? '';
+      final oldPassword = userData['password']?.toString() ?? '';
+      if (email.isEmpty || oldPassword.isEmpty) return;
+
+      tempApp = await Firebase.initializeApp(
+        name: 'tempPassUpdate_${DateTime.now().millisecondsSinceEpoch}',
+        options: Firebase.app().options,
+      );
+      final auth = FirebaseAuth.instanceFor(app: tempApp);
+      await auth.signInWithEmailAndPassword(email: email, password: oldPassword);
+      await auth.currentUser?.updatePassword(newPassword);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Auth password update: $e'), backgroundColor: Colors.orange),
+        );
+      }
+    } finally {
+      await tempApp?.delete();
+    }
   }
 
   Future<void> _registerAuthUser(BuildContext context, Map<String, dynamic> dbData, String email, String password) async {
@@ -1022,7 +1061,7 @@ class _SuperAdminGameLedgerScreenState extends State<SuperAdminGameLedgerScreen>
              } else if (data['role'] == 'user') {
                 String uName = data['name'] ?? data['email']?.toString().split('@')[0] ?? 'Unknown';
                 userToAdminMap[doc.id] = data['createdBy'] ?? '';
-                userCommissionMap[doc.id] = (double.tryParse(data['commission']?.toString() ?? '10.0') ?? 10.0) / 100.0;
+                userCommissionMap[doc.id] = (double.tryParse(data['commission']?.toString() ?? '0.0') ?? 0.0) / 100.0;
                 agentNamesMap[doc.id] = uName;
 
                 // Populate user drop down based on admin filter
@@ -1123,7 +1162,7 @@ class _SuperAdminGameLedgerScreenState extends State<SuperAdminGameLedgerScreen>
                       }
 
                       // Calculate commission per user dynamically based on their set rate
-                      double commPercent = userCommissionMap[uId] ?? 0.10;
+                      double commPercent = userCommissionMap[uId] ?? 0.0;
                       totalCommission += (amount * commPercent);
                     }
 
@@ -1310,7 +1349,7 @@ class _SuperAdminSlipPageState extends State<SuperAdminSlipPage> {
                      var d = doc.data() as Map<String, dynamic>;
                      if (d['role'] == 'user') {
                        userAdminMap[doc.id] = d['createdBy'] ?? '';
-                       userCommMap[doc.id] = (double.tryParse(d['commission']?.toString() ?? '') ?? 10.0) / 100.0;
+                       userCommMap[doc.id] = (double.tryParse(d['commission']?.toString() ?? '') ?? 0.0) / 100.0;
                      }
                   }
 
@@ -1362,7 +1401,7 @@ class _SuperAdminSlipPageState extends State<SuperAdminSlipPage> {
                         }
 
                         // Calculate commission dynamically
-                        double commPercent = userCommMap[uId] ?? 0.10;
+                        double commPercent = userCommMap[uId] ?? 0.0;
                         totalCommission += (amount * commPercent);
                       }
 
@@ -1456,8 +1495,8 @@ class _SuperAdminSlipPageState extends State<SuperAdminSlipPage> {
                                     );
                                   },
                                   icon: const Icon(Icons.picture_as_pdf, size: 18),
-                                  style: ElevatedButton.styleFrom(backgroundColor: kPrimary, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))),
-                                  label: const Text("प्रिन्ट / PDF करा"),
+                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4))),
+                                  label: const Text("Download PDF"),
                                 ),
                               )
                             ],
@@ -2215,10 +2254,11 @@ class _SuperAdminGameLoadReportPageState extends State<SuperAdminGameLoadReportP
 
                       double grandTotal = 0;
                       List<String> figuresList = groupedBets.keys.toList();
+                      // SORTING BY AMOUNT DESCENDING — Bada amount pehle
                       figuresList.sort((a, b) {
-                        int valA = int.tryParse(a) ?? 0;
-                        int valB = int.tryParse(b) ?? 0;
-                        return valB.compareTo(valA); 
+                        double amtA = (groupedBets[a] ?? []).fold(0.0, (sum, bet) => sum + (double.tryParse((bet as Map)['amount']?.toString() ?? '') ?? 0.0));
+                        double amtB = (groupedBets[b] ?? []).fold(0.0, (sum, bet) => sum + (double.tryParse((bet as Map)['amount']?.toString() ?? '') ?? 0.0));
+                        return amtB.compareTo(amtA);
                       });
                       for(var list in groupedBets.values) {
                          grandTotal += list.fold(0, (sum, bet) => sum + (double.tryParse((bet as Map)['amount']?.toString() ?? '') ?? 0.0));
@@ -2392,26 +2432,35 @@ class _SuperAdminPaymentPageState extends State<SuperAdminPaymentPage> {
                       await FirebaseFirestore.instance.runTransaction((transaction) async {
                         DocumentReference userRef = FirebaseFirestore.instance.collection('users').doc(docId);
                         DocumentSnapshot userSnap = await transaction.get(userRef);
-                        int currentBal = int.tryParse((userSnap.data() as Map<String, dynamic>)['balance']?.toString() ?? '') ?? 0;
-                        int newBal = currentBal + val;
-                        transaction.update(userRef, {'balance': newBal});
-
-                        // Transaction type:
-                        // 'win_paid' = admin ne WIN ka paisa diya → Vatap mein dikhega slip mein
-                        // 'add'      = normal balance add → Vatap mein NAHI
-                        // 'deduct'   = agent ne cash diya → Vasuli mein dikhega
+                        final uData2 = userSnap.data() as Map<String, dynamic>;
+                        int currentBal   = int.tryParse(uData2['balance']?.toString() ?? '') ?? 0;
+                        int currentLimit = int.tryParse(uData2['limit']?.toString()   ?? '') ?? 0;
+                        int newBal   = currentBal;
+                        int newLimit = currentLimit;
                         String txType;
+
                         if (val < 0) {
-                          txType = 'deduct';
+                          // Vasuli: Admin ne cash liya → balance GHATTA
+                          newBal = currentBal + val; // val is negative
+                          txType = 'vasuli';
                         } else if (isWinPayment) {
-                          txType = 'win_paid';
+                          // Vatap: Admin ne win ka paisa diya → balance GHATTA (agent ka outstanding ghata)
+                          // limit bhi ghatti (agent ne game khela tha)
+                          newBal   = currentBal   - val;
+                          newLimit = currentLimit - val;
+                          txType = 'vatap';
                         } else {
+                          // Manual add: Limit increase (credit diya)
+                          newLimit = currentLimit + val;
                           txType = 'add';
                         }
 
+                        transaction.update(userRef, {'balance': newBal, 'limit': newLimit});
+
                         transaction.set(FirebaseFirestore.instance.collection('transactions').doc(), {
-                           'userId': docId, 'amount': val, 'type': txType,
+                           'userId': docId, 'amount': val.abs(), 'type': txType,
                            'previousBalance': currentBal, 'newBalance': newBal,
+                           'previousLimit': currentLimit, 'newLimit': newLimit,
                            'timestamp': FieldValue.serverTimestamp(),
                            'adminId': FirebaseAuth.instance.currentUser?.uid ?? "",
                            'note': noteCtrl.text.trim(),
@@ -2535,7 +2584,116 @@ class SuperAdminPaymentHistoryScreen extends StatefulWidget {
 }
 
 class _SuperAdminPaymentHistoryScreenState extends State<SuperAdminPaymentHistoryScreen> {
-  String _filterType = 'All'; // 'All', 'add', 'deduct'
+  String _filterType = 'All';
+
+  Future<void> _deleteTransaction(String txId, Map<String, dynamic> data) async {
+    bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text("Transaction Delete करें?", style: TextStyle(color: kAccent, fontWeight: FontWeight.bold)),
+        content: const Text("यह transaction delete होगी और balance/limit reverse होगा।", style: TextStyle(color: kTextMain, fontSize: 13)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("रद्द करा", style: TextStyle(color: Colors.grey))),
+          ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: kAccent, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true), child: const Text("Delete करा")),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final userRef  = FirebaseFirestore.instance.collection('users').doc(widget.userId);
+        final userSnap = await tx.get(userRef);
+        if (!userSnap.exists) throw Exception("User not found!");
+        final uData      = userSnap.data() as Map<String, dynamic>;
+        int currentBal   = int.tryParse(uData['balance']?.toString() ?? '') ?? 0;
+        int currentLimit = int.tryParse(uData['limit']?.toString()   ?? '') ?? 0;
+        int txAmt        = int.tryParse(data['amount']?.toString()   ?? '') ?? 0;
+        String txType    = data['type']?.toString() ?? '';
+        bool isVasuli = txType == 'vasuli' || txType == 'deduct';
+        bool isVatap  = txType == 'vatap'  || txType == 'win_paid';
+        bool isAdd    = txType == 'add';
+        int newBal   = currentBal;
+        int newLimit = currentLimit;
+        // Reverse:
+        if (isVasuli)    { newBal = currentBal + txAmt; }
+        else if (isVatap){ newBal = currentBal + txAmt; newLimit = currentLimit + txAmt; }
+        else if (isAdd)  { newLimit = currentLimit - txAmt; }
+        tx.update(userRef, {'balance': newBal, 'limit': newLimit});
+        tx.delete(FirebaseFirestore.instance.collection('transactions').doc(txId));
+      });
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Transaction delete! Reverse झाला."), backgroundColor: Colors.green));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: \$e"), backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _editTransaction(String txId, Map<String, dynamic> data) async {
+    final amtCtrl  = TextEditingController(text: data['amount']?.toString() ?? '');
+    final noteCtrl = TextEditingController(text: data['note']?.toString() ?? '');
+    bool isSubmitting = false;
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setD) => AlertDialog(
+          backgroundColor: Colors.white,
+          title: const Text("Transaction Edit करें", style: TextStyle(color: kPrimary, fontWeight: FontWeight.bold)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: amtCtrl, keyboardType: TextInputType.number,
+              decoration: InputDecoration(labelText: "नई राशि ₹", border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), prefixIcon: const Icon(Icons.currency_rupee, color: kPrimary))),
+            const SizedBox(height: 12),
+            TextField(controller: noteCtrl,
+              decoration: InputDecoration(labelText: "Note (Optional)", border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), prefixIcon: const Icon(Icons.note, color: kPrimary))),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("रद्द करा", style: TextStyle(color: Colors.grey))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: kPrimary, foregroundColor: Colors.white),
+              onPressed: isSubmitting ? null : () async {
+                int newAmt = int.tryParse(amtCtrl.text.trim()) ?? 0;
+                if (newAmt <= 0) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("राशि सही भरें!"), backgroundColor: Colors.red)); return; }
+                setD(() => isSubmitting = true);
+                try {
+                  await FirebaseFirestore.instance.runTransaction((tx) async {
+                    final userRef  = FirebaseFirestore.instance.collection('users').doc(widget.userId);
+                    final userSnap = await tx.get(userRef);
+                    if (!userSnap.exists) throw Exception("User not found!");
+                    final uData      = userSnap.data() as Map<String, dynamic>;
+                    int currentBal   = int.tryParse(uData['balance']?.toString() ?? '') ?? 0;
+                    int currentLimit = int.tryParse(uData['limit']?.toString()   ?? '') ?? 0;
+                    int oldAmt       = int.tryParse(data['amount']?.toString()   ?? '') ?? 0;
+                    String txType    = data['type']?.toString() ?? '';
+                    bool isVasuli = txType == 'vasuli' || txType == 'deduct';
+                    bool isVatap  = txType == 'vatap'  || txType == 'win_paid';
+                    bool isAdd    = txType == 'add';
+                    int newBal = currentBal; int newLimit = currentLimit;
+                    // Step 1: Reverse old
+                    if (isVasuli)    { newBal = currentBal + oldAmt; }
+                    else if (isVatap){ newBal = currentBal + oldAmt; newLimit = currentLimit + oldAmt; }
+                    else if (isAdd)  { newLimit = currentLimit - oldAmt; }
+                    // Step 2: Apply new
+                    if (isVasuli)    { newBal = newBal - newAmt; }
+                    else if (isVatap){ newBal = newBal - newAmt; newLimit = newLimit - newAmt; }
+                    else if (isAdd)  { newLimit = newLimit + newAmt; }
+                    tx.update(userRef, {'balance': newBal, 'limit': newLimit});
+                    tx.update(FirebaseFirestore.instance.collection('transactions').doc(txId),
+                      {'amount': newAmt, 'newBalance': newBal, 'newLimit': newLimit, 'note': noteCtrl.text.trim(), 'editedAt': FieldValue.serverTimestamp()});
+                  });
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Transaction update!"), backgroundColor: Colors.green));
+                } catch (e) {
+                  setD(() => isSubmitting = false);
+                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: \$e"), backgroundColor: Colors.red));
+                }
+              },
+              child: isSubmitting ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text("Update करा"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildFilterButton(String type, String label, IconData icon, [Color? activeColor]) {
     bool isSelected = _filterType == type;
@@ -2637,10 +2795,17 @@ class _SuperAdminPaymentHistoryScreenState extends State<SuperAdminPaymentHistor
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
                     var data = docs[index].data() as Map<String, dynamic>;
-                    bool isAdd = data['type'] == 'add';
-                    int amount = data['amount'] ?? 0;
-                    int prevBal = data['previousBalance'] ?? 0;
-                    int newBal = data['newBalance'] ?? 0;
+                    String txId = docs[index].id;
+                    String txType2 = data['type']?.toString() ?? '';
+                    bool isVasuli2 = txType2 == 'vasuli' || txType2 == 'deduct';
+                    bool isVatap2  = txType2 == 'vatap'  || txType2 == 'win_paid';
+                    bool isAdd     = txType2 == 'add';
+                    Color cardColor = isVasuli2 ? Colors.blue.shade700 : (isVatap2 ? Colors.green.shade700 : Colors.orange.shade700);
+                    String cardLabel = isVasuli2 ? "💰 वसुली (Vasuli)" : (isVatap2 ? "🏆 वाटप (Vatap)" : "➕ Add Funds");
+                    IconData cardIcon = isVasuli2 ? Icons.arrow_downward : (isVatap2 ? Icons.arrow_upward : Icons.add);
+                    int amount  = int.tryParse(data['amount']?.toString() ?? '') ?? 0;
+                    int prevBal = int.tryParse(data['previousBalance']?.toString() ?? '') ?? 0;
+                    int newBal2 = int.tryParse(data['newBalance']?.toString() ?? '') ?? 0;
                     String note = data['note'] ?? '';
                     
                     Timestamp? ts = data['timestamp'];
@@ -2663,23 +2828,37 @@ class _SuperAdminPaymentHistoryScreenState extends State<SuperAdminPaymentHistor
                                   children: [
                                     CircleAvatar(
                                       radius: 16,
-                                      backgroundColor: isAdd ? Colors.green.shade50 : Colors.red.shade50,
-                                      child: Icon(isAdd ? Icons.arrow_downward : Icons.arrow_upward, color: isAdd ? Colors.green : Colors.red, size: 18),
+                                      backgroundColor: cardColor.withOpacity(0.1),
+                                      child: Icon(cardIcon, color: cardColor, size: 18),
                                     ),
                                     const SizedBox(width: 10),
                                     Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(isAdd ? "Funds Added (जमा)" : "Funds Deducted (नावे)", style: TextStyle(color: isAdd ? Colors.green.shade700 : Colors.red.shade700, fontWeight: FontWeight.bold, fontSize: 15)),
+                                        Text(cardLabel, style: TextStyle(color: cardColor, fontWeight: FontWeight.bold, fontSize: 15)),
                                         Text(dateStr, style: const TextStyle(color: kTextGrey, fontSize: 11)),
                                       ],
                                     )
                                   ],
                                 ),
-                                Text(
-                                  "${isAdd ? '+' : ''}₹${amount.abs()}", 
-                                  style: TextStyle(color: isAdd ? Colors.green : Colors.red, fontWeight: FontWeight.bold, fontSize: 18)
-                                )
+                                Row(children: [
+                                  Text(
+                                    "₹${amount.abs()}", 
+                                    style: TextStyle(color: cardColor, fontWeight: FontWeight.bold, fontSize: 18)
+                                  ),
+                                  PopupMenuButton<String>(
+                                    icon: const Icon(Icons.more_vert, color: kTextGrey, size: 20),
+                                    color: Colors.white,
+                                    onSelected: (val) {
+                                      if (val == 'edit') _editTransaction(txId, data);
+                                      if (val == 'delete') _deleteTransaction(txId, data);
+                                    },
+                                    itemBuilder: (_) => [
+                                      const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, color: kPrimary, size: 18), SizedBox(width: 8), Text("Edit करा")])),
+                                      const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, color: kAccent, size: 18), SizedBox(width: 8), Text("Delete करा", style: TextStyle(color: kAccent))])),
+                                    ],
+                                  ),
+                                ]),
                               ],
                             ),
                             const Divider(height: 20, color: Colors.black12),
@@ -2687,7 +2866,7 @@ class _SuperAdminPaymentHistoryScreenState extends State<SuperAdminPaymentHistor
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text("Prev Bal: ₹$prevBal", style: const TextStyle(color: kTextGrey, fontSize: 12)),
-                                Text("New Bal: ₹$newBal", style: const TextStyle(color: kTextMain, fontSize: 12, fontWeight: FontWeight.bold)),
+                                Text("New Bal: ₹$newBal2", style: const TextStyle(color: kTextMain, fontSize: 12, fontWeight: FontWeight.bold)),
                               ],
                             ),
                             if (note.isNotEmpty) ...[
@@ -2740,8 +2919,8 @@ class _SuperAdminJamaNaaveReceiptPageState extends State<SuperAdminJamaNaaveRece
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text("Total Dene: ${dene.toStringAsFixed(2)}", style: pw.TextStyle(color: PdfColors.red, fontWeight: pw.FontWeight.bold)),
-                pw.Text("Total Yene: ${yene.toStringAsFixed(2)}", style: pw.TextStyle(color: PdfColors.green, fontWeight: pw.FontWeight.bold)),
+                pw.Text("Total Jama: ${dene.toStringAsFixed(2)}", style: pw.TextStyle(color: PdfColors.red, fontWeight: pw.FontWeight.bold)),
+                pw.Text("Total Baki: ${yene.toStringAsFixed(2)}", style: pw.TextStyle(color: PdfColors.green, fontWeight: pw.FontWeight.bold)),
               ]
             ),
             pw.SizedBox(height: 20),
@@ -2873,7 +3052,7 @@ class _SuperAdminJamaNaaveReceiptPageState extends State<SuperAdminJamaNaaveRece
                     'id': doc.id,
                     'name': data['name'] ?? data['email']?.toString().split('@')[0] ?? 'Unknown',
                     'balance': bal,
-                    'commission': (data['commission'] as num?)?.toDouble() ?? 10.0,
+                    'commission': (data['commission'] as num?)?.toDouble() ?? 0.0,
                     'status': data['approved']==true ? 'Active' : 'Deactive',
                   });
                   if (bal > 0) dene += bal;
@@ -2890,13 +3069,13 @@ class _SuperAdminJamaNaaveReceiptPageState extends State<SuperAdminJamaNaaveRece
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                const Text("Dene Balance", style: TextStyle(color: kTextGrey, fontWeight: FontWeight.bold)),
+                                const Text("Jama Balance", style: TextStyle(color: kTextGrey, fontWeight: FontWeight.bold)),
                                 const Text("(Admin ko agent ko dena hai)", style: TextStyle(color: kTextGrey, fontSize: 11)),
                                 // RED — admin ko dena padega
                                 Text(dene.toStringAsFixed(2), style: const TextStyle(color: Colors.red, fontSize: 18, fontWeight: FontWeight.bold)),
                               ]),
                               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                                const Text("Yene Balance", style: TextStyle(color: kTextGrey, fontWeight: FontWeight.bold)),
+                                const Text("Baki Balance", style: TextStyle(color: kTextGrey, fontWeight: FontWeight.bold)),
                                 const Text("(Admin ko agent se lena hai)", style: TextStyle(color: kTextGrey, fontSize: 11)),
                                 // GREEN — admin ko milega
                                 Text(yene.toStringAsFixed(2), style: const TextStyle(color: Colors.green, fontSize: 18, fontWeight: FontWeight.bold)),
@@ -3016,7 +3195,7 @@ class _SuperAdminAgentBalanceRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double commissionPct = (userData['commission'] as num?)?.toDouble() ?? 10.0;
+    final double commissionPct = (userData['commission'] as num?)?.toDouble() ?? 0.0;
     final String name = userData['name']?.toString() ?? 'Unknown';
     final String status = userData['status']?.toString() ?? 'Active';
 
@@ -3580,6 +3759,9 @@ class _EditTimingsDialogState extends State<EditTimingsDialog> {
 // -----------------------------------------------------------------------------
 // GLOBAL DAY SLIP WITH PDF MATCHING ADMIN
 // -----------------------------------------------------------------------------
+// =============================================================================
+// SUPER ADMIN GLOBAL DAY SLIP — Admin + Agent Filter + PDF
+// =============================================================================
 class SuperAdminDaySlipScreen extends StatefulWidget {
   const SuperAdminDaySlipScreen({super.key});
 
@@ -3589,19 +3771,19 @@ class SuperAdminDaySlipScreen extends StatefulWidget {
 
 class _SuperAdminDaySlipScreenState extends State<SuperAdminDaySlipScreen> {
   DateTime _selectedDate = DateTime.now();
+  String? _selectedAdminId;  // null = All Admins
+  String? _selectedUserId;   // null = All Agents under chosen admin
 
-  Future<void> _pickDate() async {
+  Future<void> _pickDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
       firstDate: DateTime(2024),
       lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: ThemeData.light().copyWith(colorScheme: const ColorScheme.light(primary: kPrimary)),
-          child: child!,
-        );
-      },
+      builder: (context, child) => Theme(
+        data: ThemeData.light().copyWith(colorScheme: const ColorScheme.light(primary: kPrimary)),
+        child: child!,
+      ),
     );
     if (picked != null && picked != _selectedDate) {
       setState(() => _selectedDate = picked);
@@ -3612,14 +3794,134 @@ class _SuperAdminDaySlipScreenState extends State<SuperAdminDaySlipScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6.0),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded(flex: 2, child: Text(title, style: TextStyle(color: Colors.black, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal))),
-          if (val1 != null) Expanded(flex: 1, child: Text(val1.toStringAsFixed(2), textAlign: TextAlign.right, style: TextStyle(color: Colors.green, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal))),
-          if (val2 != null) Expanded(flex: 1, child: Text(val2.toStringAsFixed(2), textAlign: TextAlign.right, style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)))
-          else Expanded(flex: 1, child: const SizedBox()),
+          Expanded(
+            flex: 2,
+            child: Text(title, style: TextStyle(color: Colors.black, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              val1 != null ? val1.toStringAsFixed(2) : '',
+              textAlign: TextAlign.right,
+              style: TextStyle(color: Colors.green, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal),
+            ),
+          ),
+          Expanded(
+            flex: 1,
+            child: Text(
+              val2 != null ? val2.toStringAsFixed(2) : '',
+              textAlign: TextAlign.right,
+              style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: isBold ? FontWeight.bold : FontWeight.normal),
+            ),
+          ),
         ],
       ),
+    );
+  }
+
+  Future<void> _printPdf({
+    required String filterLabel,
+    required Map<String, Map<String, double>> gameStats,
+    required double totalDhanda,
+    required double totalPayment,
+    required double commission,
+    required double netDhanda,
+    required double profit,
+  }) async {
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (pw.Context ctx) {
+          final rows = gameStats.entries
+              .map((e) => [
+                    e.key,
+                    e.value['dhanda']!.toStringAsFixed(2),
+                    e.value['payment']!.toStringAsFixed(2),
+                  ])
+              .toList();
+
+          pw.Widget pdfRow(String label, String v1, String v2, {bool bold = false}) {
+            final s = pw.TextStyle(fontSize: 10, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal);
+            return pw.Padding(
+              padding: const pw.EdgeInsets.symmetric(vertical: 3),
+              child: pw.Row(children: [
+                pw.Expanded(flex: 3, child: pw.Text(label, style: s)),
+                pw.Expanded(flex: 2, child: pw.Text(v1, textAlign: pw.TextAlign.right, style: s.copyWith(color: PdfColors.green800))),
+                pw.Expanded(flex: 2, child: pw.Text(v2, textAlign: pw.TextAlign.right, style: s.copyWith(color: PdfColors.red800))),
+              ]),
+            );
+          }
+
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Center(child: pw.Text('GLOBAL SUMMARY', style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold))),
+              pw.Divider(),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text('Date: ${DateFormat('dd-MM-yyyy').format(_selectedDate)}', style: const pw.TextStyle(fontSize: 11)),
+                  pw.Text('Filter: $filterLabel', style: const pw.TextStyle(fontSize: 11)),
+                ],
+              ),
+              pw.Divider(),
+              pw.SizedBox(height: 8),
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(3),
+                  1: const pw.FlexColumnWidth(2),
+                  2: const pw.FlexColumnWidth(2),
+                },
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
+                    children: [
+                      pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text('Game', style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 11))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text('Dhanda', textAlign: pw.TextAlign.right, style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 11))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text('Payment', textAlign: pw.TextAlign.right, style: pw.TextStyle(color: PdfColors.white, fontWeight: pw.FontWeight.bold, fontSize: 11))),
+                    ],
+                  ),
+                  ...rows.asMap().entries.map((entry) => pw.TableRow(
+                    decoration: pw.BoxDecoration(color: entry.key % 2 == 0 ? PdfColors.white : PdfColors.grey100),
+                    children: [
+                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(entry.value[0], style: const pw.TextStyle(fontSize: 10))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(entry.value[1], textAlign: pw.TextAlign.right, style: const pw.TextStyle(fontSize: 10, color: PdfColors.green800))),
+                      pw.Padding(padding: const pw.EdgeInsets.all(5), child: pw.Text(entry.value[2], textAlign: pw.TextAlign.right, style: const pw.TextStyle(fontSize: 10, color: PdfColors.red800))),
+                    ],
+                  )),
+                ],
+              ),
+              pw.SizedBox(height: 12),
+              pw.Divider(),
+              pdfRow('Total', totalDhanda.toStringAsFixed(2), totalPayment.toStringAsFixed(2), bold: true),
+              pdfRow('Commission (Dynamic)', commission.toStringAsFixed(2), ''),
+              pdfRow('Net Total', netDhanda.toStringAsFixed(2), totalPayment.toStringAsFixed(2), bold: true),
+              pw.SizedBox(height: 10),
+              pw.Container(
+                color: profit >= 0 ? PdfColors.green700 : PdfColors.red700,
+                padding: const pw.EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Global Net Profit/Loss', style: pw.TextStyle(color: PdfColors.white, fontSize: 13, fontWeight: pw.FontWeight.bold)),
+                    pw.Text(profit.toStringAsFixed(2), style: pw.TextStyle(color: PdfColors.white, fontSize: 13, fontWeight: pw.FontWeight.bold)),
+                  ],
+                ),
+              ),
+              pw.Spacer(),
+              pw.Center(child: pw.Text('* Generated by MATKAWALA Super Admin Panel *', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey))),
+            ],
+          );
+        },
+      ),
+    );
+    await Printing.layoutPdf(
+      onLayout: (format) async => pdf.save(),
+      name: 'GlobalDaySlip_${DateFormat('dd-MM-yyyy').format(_selectedDate)}.pdf',
     );
   }
 
@@ -3639,123 +3941,303 @@ class _SuperAdminDaySlipScreenState extends State<SuperAdminDaySlipScreen> {
         elevation: 1,
         iconTheme: const IconThemeData(color: Colors.black),
         actions: [
-          IconButton(icon: const Icon(Icons.calendar_month, color: kPrimary), onPressed: _pickDate),
+          IconButton(icon: const Icon(Icons.calendar_month, color: kPrimary), onPressed: () => _pickDate(context)),
         ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('bets').snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) return Center(child: Text("Error: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Colors.black));
-          
-          var docs = snapshot.data!.docs;
+        // Fetch all users (admins + agents)
+        stream: FirebaseFirestore.instance.collection('users').snapshots(),
+        builder: (context, usersSnap) {
+          if (!usersSnap.hasData) return const Center(child: CircularProgressIndicator(color: Colors.black));
 
-          final todayDocs = docs.where((doc) {
-             var data = doc.data() as Map<String, dynamic>;
-             Timestamp? ts = data['timestamp'];
-             if (ts == null) return false;
-             DateTime dt = ts.toDate();
-             return dt.year == _selectedDate.year && dt.month == _selectedDate.month && dt.day == _selectedDate.day;
-          }).toList();
+          // Build maps
+          final Map<String, double> globalCommMap = {};   // userId → commRate (fraction)
+          final Map<String, String> adminNameMap = {};    // adminId → name
+          final Map<String, String> agentNameMap = {};    // agentId → name
+          final Map<String, String> agentToAdmin = {};    // agentId → adminId
 
-          if (todayDocs.isEmpty) {
-            return const Center(child: Text("कोणताही डेटा सापडला नाही (No data found)", style: TextStyle(color: Colors.black54, fontSize: 16)));
+          for (var doc in usersSnap.data!.docs) {
+            final d = doc.data() as Map<String, dynamic>;
+            final String role = d['role']?.toString() ?? '';
+            final double commRate = (double.tryParse(d['commission']?.toString() ?? '') ?? 0.0) / 100.0;
+            globalCommMap[doc.id] = commRate;
+
+            String nm = d['name']?.toString() ?? '';
+            if (nm.isEmpty) nm = (d['email']?.toString() ?? '').replaceAll('@matkawala.com', '');
+            if (nm.isEmpty) nm = role == 'admin' ? 'Admin' : 'Agent';
+
+            if (role == 'admin') {
+              adminNameMap[doc.id] = nm;
+            } else if (role == 'user') {
+              agentNameMap[doc.id] = nm;
+              final String createdBy = d['createdBy']?.toString() ?? '';
+              if (createdBy.isNotEmpty) agentToAdmin[doc.id] = createdBy;
+            }
           }
 
-          Map<String, Map<String, double>> gameStats = {};
+          final adminEntries = adminNameMap.entries.toList()..sort((a, b) => a.value.compareTo(b.value));
 
-          for (var doc in todayDocs) {
-            var data = doc.data() as Map<String, dynamic>;
-            String game = data['gameName'] ?? 'Unknown';
-            double amount = double.tryParse(data['amount']?.toString() ?? '') ?? 0.0;
-            double payment = double.tryParse(data['potentialWin']?.toString() ?? '') ?? 0.0;
+          // Agents under selected admin
+          final Map<String, String> visibleAgents = _selectedAdminId == null
+              ? agentNameMap
+              : Map.fromEntries(agentNameMap.entries.where((e) => agentToAdmin[e.key] == _selectedAdminId));
 
-            if (data['status'] != 'won') {
-              payment = 0.0;
-            }
+          final agentEntries = visibleAgents.entries.toList()..sort((a, b) => a.value.compareTo(b.value));
 
-            if (!gameStats.containsKey(game)) {
-              gameStats[game] = {'dhanda': 0.0, 'payment': 0.0};
-            }
-            gameStats[game]!['dhanda'] = gameStats[game]!['dhanda']! + amount;
-            gameStats[game]!['payment'] = gameStats[game]!['payment']! + payment;
+          // If selected agent doesn't belong to new admin, reset
+          if (_selectedUserId != null && !visibleAgents.containsKey(_selectedUserId)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _selectedUserId = null);
+            });
           }
 
-          double totalDhanda = 0;
-          double totalPayment = 0;
+          return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('bets').snapshots(),
+            builder: (context, betSnap) {
+              if (betSnap.hasError) return Center(child: Text("Error: ${betSnap.error}", style: const TextStyle(color: Colors.red)));
+              if (!betSnap.hasData) return const Center(child: CircularProgressIndicator(color: Colors.black));
 
-          gameStats.forEach((key, value) {
-            totalDhanda += value['dhanda']!;
-            totalPayment += value['payment']!;
-          });
+              // Filter bets by date + admin/agent
+              final todayDocs = betSnap.data!.docs.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final Timestamp? ts = data['timestamp'];
+                if (ts == null) return false;
+                final dt = ts.toDate();
+                if (dt.year != _selectedDate.year || dt.month != _selectedDate.month || dt.day != _selectedDate.day) return false;
 
-          // Assume avg 10% commission globally for overall slip
-          double commission = totalDhanda * 0.10; 
-          double netDhanda = totalDhanda - commission;
-          double profit = netDhanda - totalPayment; 
+                final String uid = data['userId']?.toString() ?? '';
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Center(child: Text('GLOBAL SUMMARY', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black))),
-                const Divider(color: Colors.black),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text("Date: ${DateFormat('dd-MM-yyyy').format(_selectedDate)}", style: const TextStyle(color: Colors.black)),
-                  ],
-                ),
-                const Divider(color: Colors.black),
-                const SizedBox(height: 10),
+                // Agent-level filter
+                if (_selectedUserId != null) return uid == _selectedUserId;
 
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: const [
-                    Expanded(flex: 2, child: Text('Game', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 15))),
-                    Expanded(flex: 1, child: Text('Dhanda', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 15))),
-                    Expanded(flex: 1, child: Text('Payment', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 15))),
-                  ],
-                ),
-                const Divider(color: Colors.black),
+                // Admin-level filter: only agents of selected admin
+                if (_selectedAdminId != null) return agentToAdmin[uid] == _selectedAdminId;
 
-                ...gameStats.entries.map((e) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
+                // No filter: all bets
+                return true;
+              }).toList();
+
+              // Compute stats
+              final Map<String, Map<String, double>> gameStats = {};
+              double commission = 0.0;
+
+              for (var doc in todayDocs) {
+                final data = doc.data() as Map<String, dynamic>;
+                final String game = data['gameName'] ?? 'Unknown';
+                final String uId = data['userId'] ?? '';
+                final double amount = double.tryParse(data['amount']?.toString() ?? '') ?? 0.0;
+                double payment = 0.0;
+                if (data['status'] == 'won') {
+                  payment = double.tryParse(data['potentialWin']?.toString() ?? '') ?? 0.0;
+                }
+                gameStats.putIfAbsent(game, () => {'dhanda': 0.0, 'payment': 0.0});
+                gameStats[game]!['dhanda'] = gameStats[game]!['dhanda']! + amount;
+                gameStats[game]!['payment'] = gameStats[game]!['payment']! + payment;
+                commission += amount * (globalCommMap[uId] ?? 0.0);
+              }
+
+              double totalDhanda = 0, totalPayment = 0;
+              gameStats.forEach((_, v) {
+                totalDhanda += v['dhanda']!;
+                totalPayment += v['payment']!;
+              });
+              final double netDhanda = totalDhanda - commission;
+              final double profit = netDhanda - totalPayment;
+
+              // Label for header + PDF
+              String filterLabel = 'All (Global)';
+              if (_selectedUserId != null) {
+                filterLabel = 'Agent: ${agentNameMap[_selectedUserId] ?? _selectedUserId}';
+              } else if (_selectedAdminId != null) {
+                filterLabel = 'Admin: ${adminNameMap[_selectedAdminId] ?? _selectedAdminId}';
+              }
+
+              return Column(
+                children: [
+                  // ── Filter Bar ──
+                  Container(
+                    color: Colors.grey.shade100,
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+                    child: Column(
                       children: [
-                        Expanded(flex: 2, child: Text(e.key, style: const TextStyle(color: Colors.black, fontSize: 14))),
-                        Expanded(flex: 1, child: Text(e.value['dhanda']!.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.bold))),
-                        Expanded(flex: 1, child: Text(e.value['payment']!.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.bold))),
+                        // Admin filter row
+                        Row(
+                          children: [
+                            const Icon(Icons.admin_panel_settings, color: kPrimary, size: 20),
+                            const SizedBox(width: 8),
+                            const SizedBox(width: 52, child: Text('Admin:', style: TextStyle(color: kTextMain, fontWeight: FontWeight.bold, fontSize: 13))),
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  border: Border.all(color: Colors.grey.shade300),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String?>(
+                                    isExpanded: true,
+                                    value: _selectedAdminId,
+                                    items: [
+                                      const DropdownMenuItem<String?>(
+                                        value: null,
+                                        child: Text('All Admins (Global)', style: TextStyle(color: kTextMain, fontSize: 13)),
+                                      ),
+                                      ...adminEntries.map((e) => DropdownMenuItem<String?>(
+                                        value: e.key,
+                                        child: Text(e.value, style: const TextStyle(color: kTextMain, fontSize: 13), overflow: TextOverflow.ellipsis),
+                                      )),
+                                    ],
+                                    onChanged: (val) => setState(() {
+                                      _selectedAdminId = val;
+                                      _selectedUserId = null; // Reset agent on admin change
+                                    }),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // Agent filter row
+                        Row(
+                          children: [
+                            const Icon(Icons.person_search, color: kAccent, size: 20),
+                            const SizedBox(width: 8),
+                            const SizedBox(width: 52, child: Text('Agent:', style: TextStyle(color: kTextMain, fontWeight: FontWeight.bold, fontSize: 13))),
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  border: Border.all(color: Colors.grey.shade300),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<String?>(
+                                    isExpanded: true,
+                                    value: _selectedUserId,
+                                    items: [
+                                      DropdownMenuItem<String?>(
+                                        value: null,
+                                        child: Text(
+                                          _selectedAdminId == null ? 'All Agents (Global)' : 'All Agents of Admin',
+                                          style: const TextStyle(color: kTextMain, fontSize: 13),
+                                        ),
+                                      ),
+                                      ...agentEntries.map((e) => DropdownMenuItem<String?>(
+                                        value: e.key,
+                                        child: Text(e.value, style: const TextStyle(color: kTextMain, fontSize: 13), overflow: TextOverflow.ellipsis),
+                                      )),
+                                    ],
+                                    onChanged: (val) => setState(() => _selectedUserId = val),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
-                  );
-                }).toList(),
-
-                const Divider(color: Colors.black),
-
-                _buildCalcRow('Total', totalDhanda, totalPayment, isBold: true),
-                _buildCalcRow('कमिशन (10% Avg)', commission, null),
-                _buildCalcRow('Net Total', netDhanda, totalPayment, isBold: true),
-
-                const SizedBox(height: 10),
-
-                Container(
-                  color: profit >= 0 ? Colors.green.shade700 : Colors.red.shade700,
-                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 15),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Global Net Profit', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                      Text(profit.toStringAsFixed(2), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                    ],
                   ),
-                ),
-                const SizedBox(height: 30),
-              ],
-            ),
+
+                  // ── Content ──
+                  Expanded(
+                    child: todayDocs.isEmpty
+                        ? const Center(
+                            child: Text('कोणताही डेटा सापडला नाही\n(No data found)',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.black54, fontSize: 16)),
+                          )
+                        : SingleChildScrollView(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Center(child: Text('GLOBAL SUMMARY', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black))),
+                                const Divider(color: Colors.black),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('Date: ${DateFormat('dd-MM-yyyy').format(_selectedDate)}', style: const TextStyle(color: Colors.black)),
+                                    if (_selectedAdminId != null || _selectedUserId != null)
+                                      Flexible(
+                                        child: Text(
+                                          filterLabel,
+                                          style: const TextStyle(color: kPrimary, fontWeight: FontWeight.bold, fontSize: 12),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                const Divider(color: Colors.black),
+                                const SizedBox(height: 10),
+
+                                Row(children: const [
+                                  Expanded(flex: 2, child: Text('Game', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 15))),
+                                  Expanded(flex: 1, child: Text('Dhanda', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 15))),
+                                  Expanded(flex: 1, child: Text('Payment', textAlign: TextAlign.right, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 15))),
+                                ]),
+                                const Divider(color: Colors.black),
+
+                                ...gameStats.entries.map((e) => Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                  child: Row(children: [
+                                    Expanded(flex: 2, child: Text(e.key, style: const TextStyle(color: Colors.black, fontSize: 14))),
+                                    Expanded(flex: 1, child: Text(e.value['dhanda']!.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.bold))),
+                                    Expanded(flex: 1, child: Text(e.value['payment']!.toStringAsFixed(2), textAlign: TextAlign.right, style: const TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.bold))),
+                                  ]),
+                                )),
+
+                                const Divider(color: Colors.black),
+                                _buildCalcRow('Total', totalDhanda, totalPayment, isBold: true),
+                                _buildCalcRow('कमिशन (Dynamic)', commission, null),
+                                _buildCalcRow('Net Total', netDhanda, totalPayment, isBold: true),
+                                const SizedBox(height: 10),
+
+                                Container(
+                                  color: profit >= 0 ? Colors.green.shade700 : Colors.red.shade700,
+                                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 15),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      const Text('Global Net Profit', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                                      Text(profit.toStringAsFixed(2), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+
+                                const SizedBox(height: 20),
+
+                                Center(
+                                  child: ElevatedButton.icon(
+                                    onPressed: () => _printPdf(
+                                      filterLabel: filterLabel,
+                                      gameStats: gameStats,
+                                      totalDhanda: totalDhanda,
+                                      totalPayment: totalPayment,
+                                      commission: commission,
+                                      netDhanda: netDhanda,
+                                      profit: profit,
+                                    ),
+                                    icon: const Icon(Icons.picture_as_pdf, color: Colors.white),
+                                    label: const Text('PDF Print / Download', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: kAccent,
+                                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                  ),
+                                ),
+
+                                const SizedBox(height: 30),
+                              ],
+                            ),
+                          ),
+                  ),
+                ],
+              );
+            },
           );
         },
       ),

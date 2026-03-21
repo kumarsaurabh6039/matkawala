@@ -64,7 +64,7 @@ class _ManageAdminScreenState extends State<ManageAdminScreen> {
                   TextField(controller: nameCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "नाव (Name)", labelStyle: TextStyle(color: kTextGrey))),
                   TextField(controller: phoneCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "मोबाईल (Phone)", labelStyle: TextStyle(color: kTextGrey))),
                   if (!isEdit) TextField(controller: emailCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "लॉगिन आयडी (Username)", labelStyle: TextStyle(color: kTextGrey))),
-                  TextField(controller: passCtrl, style: const TextStyle(color: kTextMain), decoration: const InputDecoration(labelText: "पासवर्ड (Password)", labelStyle: TextStyle(color: kTextGrey))),
+                  TextField(controller: passCtrl, style: const TextStyle(color: kTextMain), obscureText: false, decoration: const InputDecoration(labelText: "पासवर्ड (Password)", labelStyle: TextStyle(color: kTextGrey), hintText: "कोणतेही 6+ अक्षरे / numbers", hintStyle: TextStyle(color: Colors.grey, fontSize: 12))),
                   
                   const SizedBox(height: 24),
                   const Text("अधिकार नियंत्रण (Permissions):", style: TextStyle(fontWeight: FontWeight.bold, color: kPrimary, fontSize: 15)),
@@ -119,6 +119,15 @@ class _ManageAdminScreenState extends State<ManageAdminScreen> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.purple, foregroundColor: Colors.white),
                 onPressed: () async {
+                  // Password validation — min 6 chars, no @ required
+                  String pass = passCtrl.text.trim();
+                  if (pass.length < 6) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("पासवर्ड कमीत कमी 6 अक्षरांचा असावा! (Min. 6 characters)"), backgroundColor: Colors.red)
+                    );
+                    return;
+                  }
+
                   Navigator.pop(ctx);
                   String finalEmail = emailCtrl.text.trim();
                   if(!finalEmail.contains('@')) finalEmail = '$finalEmail@matkawala.com';
@@ -126,7 +135,7 @@ class _ManageAdminScreenState extends State<ManageAdminScreen> {
                   Map<String, dynamic> updateData = {
                     'name': nameCtrl.text,
                     'phone': phoneCtrl.text,
-                    'password': passCtrl.text,
+                    'password': pass,
                     'permissions': {
                       'manage_users': pUsers,
                       'manage_payments': pPayments,
@@ -137,12 +146,14 @@ class _ManageAdminScreenState extends State<ManageAdminScreen> {
                   };
 
                   if (isEdit) {
-                     await FirebaseFirestore.instance.collection('users').doc(docId).update(updateData);
-                     if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("माहिती आणि अधिकार अपडेट केले!"), backgroundColor: Colors.green));
+                    // Firebase Auth password bhi update karo
+                    await _updateAuthPassword(context, docId!, pass);
+                    await FirebaseFirestore.instance.collection('users').doc(docId).update(updateData);
+                    if(context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("माहिती आणि अधिकार अपडेट केले!"), backgroundColor: Colors.green));
                   } else {
-                     updateData['role'] = 'admin';
-                     updateData['approved'] = true;
-                     await _registerAuthUser(context, updateData, finalEmail, passCtrl.text);
+                    updateData['role'] = 'admin';
+                    updateData['approved'] = true;
+                    await _registerAuthUser(context, updateData, finalEmail, pass);
                   }
                 }, 
                 child: const Text("सेव्ह करा")
@@ -152,6 +163,35 @@ class _ManageAdminScreenState extends State<ManageAdminScreen> {
         }
       )
     );
+  }
+
+  // --- FIREBASE AUTH PASSWORD UPDATE (Edit ke liye) ---
+  Future<void> _updateAuthPassword(BuildContext context, String userId, String newPassword) async {
+    FirebaseApp? tempApp;
+    try {
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      if (!userDoc.exists) return;
+      final userData = userDoc.data() as Map<String, dynamic>;
+      final email = userData['email']?.toString() ?? '';
+      final oldPassword = userData['password']?.toString() ?? '';
+      if (email.isEmpty || oldPassword.isEmpty) return;
+
+      tempApp = await Firebase.initializeApp(
+        name: 'tempPassUpdate_${DateTime.now().millisecondsSinceEpoch}',
+        options: Firebase.app().options,
+      );
+      final auth = FirebaseAuth.instanceFor(app: tempApp);
+      await auth.signInWithEmailAndPassword(email: email, password: oldPassword);
+      await auth.currentUser?.updatePassword(newPassword);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Auth password update: $e'), backgroundColor: Colors.orange),
+        );
+      }
+    } finally {
+      await tempApp?.delete();
+    }
   }
 
   // --- FIREBASE USER CREATION ---
@@ -267,10 +307,16 @@ class _ManageAdminScreenState extends State<ManageAdminScreen> {
                               )
                             ],
                           ),
-                          Row(
-                            children: [
-                              IconButton(icon: const Icon(Icons.edit, color: Colors.orange), onPressed: () => _showAdminDialog(context, isEdit: true, docId: doc.id, data: data)),
-                              IconButton(icon: const Icon(Icons.delete, color: Colors.red), onPressed: () => _deleteUser(doc.id)),
+                          PopupMenuButton<String>(
+                            icon: const Icon(Icons.more_vert, color: kTextGrey),
+                            color: Colors.white,
+                            onSelected: (value) {
+                              if (value == 'edit') _showAdminDialog(context, isEdit: true, docId: doc.id, data: data);
+                              else if (value == 'delete') _deleteUser(doc.id);
+                            },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, color: Colors.orange, size: 18), SizedBox(width: 10), Text('Edit')])),
+                              const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, color: Colors.red, size: 18), SizedBox(width: 10), Text('Delete', style: TextStyle(color: Colors.red))])),
                             ],
                           )
                         ],

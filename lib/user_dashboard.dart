@@ -360,29 +360,47 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
 
   DateTime _parseTime(String timeStr, DateTime now) {
     try {
+      // Normalize: uppercase, remove extra spaces, replace dots with colons
       String clean = timeStr.trim().toUpperCase()
-          .replaceAll('.', ':') 
-          .replaceAll(RegExp(r'\s+'), ''); 
+          .replaceAll('.', ':')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
 
-      final RegExp regex = RegExp(r'(\d{1,2}):(\d{2})(AM|PM)?');
+      // Remove space between time and AM/PM e.g. "09:00 AM" → handled below
+      // Match patterns: "9:00AM", "09:00 AM", "9:00 PM", "9AM", "9 PM"
+      final RegExp regex = RegExp(r'(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?');
       final match = regex.firstMatch(clean);
 
       if (match != null) {
-        int hour = int.parse(match.group(1)!);
-        int minute = int.parse(match.group(2)!);
-        String? period = match.group(3); 
+        int hour   = int.parse(match.group(1)!);
+        int minute = int.tryParse(match.group(2) ?? '0') ?? 0;
+        String period = match.group(3) ?? '';
+
+        // If no AM/PM given, treat >=8 as AM, <8 as PM (typical matka hours)
+        if (period.isEmpty) {
+          if (hour >= 1 && hour <= 7) period = 'PM';
+          else period = 'AM';
+        }
 
         if (period == 'PM' && hour != 12) hour += 12;
         if (period == 'AM' && hour == 12) hour = 0;
-        
+
+        // Clamp to valid range
+        hour   = hour.clamp(0, 23);
+        minute = minute.clamp(0, 59);
+
         return DateTime(now.year, now.month, now.day, hour, minute);
       }
-      
-      final format = DateFormat.jm('en_US'); 
-      return DateTime(now.year, now.month, now.day, format.parseLoose(timeStr).hour, format.parseLoose(timeStr).minute);
-      
+
+      // Last resort: intl parse
+      final format = DateFormat.jm('en_US');
+      final parsed = format.parseLoose(timeStr);
+      return DateTime(now.year, now.month, now.day, parsed.hour, parsed.minute);
+
     } catch (e) {
-      return DateTime(now.year, now.month, now.day, 23, 59);
+      // Should never reach here now — but if it does, return midnight so it
+      // doesn't silently make market appear closed at 23:59
+      return DateTime(now.year, now.month, now.day, 0, 0);
     }
   }
 
@@ -451,7 +469,15 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
         ),
         const SizedBox(height: 10),
         Expanded(
-          child: StreamBuilder<QuerySnapshot>(
+          child: StreamBuilder<DocumentSnapshot>(
+            stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
+            builder: (context, userSnap) {
+              String adminId = '';
+              if (userSnap.hasData && userSnap.data!.exists) {
+                adminId = (userSnap.data!.data() as Map<String, dynamic>)['createdBy']?.toString() ?? '';
+              }
+              if (adminId.isEmpty) return const Center(child: CircularProgressIndicator(color: kPrimary));
+              return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance.collection('games').orderBy('order').snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: kPrimary));
@@ -461,7 +487,17 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
                 itemCount: snapshot.data?.docs.length ?? 0,
                 itemBuilder: (context, index) {
                   var doc = snapshot.data!.docs[index];
-                  var data = doc.data() as Map<String, dynamic>;
+                  // game_settings se is admin ki settings stream karo
+                  return StreamBuilder<DocumentSnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('game_settings')
+                        .doc('${adminId}_${doc.id}')
+                        .snapshots(),
+                    builder: (context, settingsSnap) {
+                      // Settings nahi hain to game hide karo
+                      if (!settingsSnap.hasData || !settingsSnap.data!.exists) return const SizedBox.shrink();
+                      var data = settingsSnap.data!.data() as Map<String, dynamic>;
+                      data['name'] = (doc.data() as Map<String, dynamic>)['name'] ?? data['gameName'] ?? '';
                   
                   var status = _getMarketStatus(data);
                   
@@ -540,8 +576,12 @@ class _HomeGamesTabState extends State<HomeGamesTab> {
                       ),
                     ),
                   );
+                    }
+                  );
                 },
               );
+            },
+          );
             },
           ),
         ),
@@ -606,16 +646,24 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
 
   DateTime _parseTime(String timeStr, DateTime now) {
     try {
-      String clean = timeStr.trim().toUpperCase().replaceAll('.', ':').replaceAll(RegExp(r'\s+'), '');
-      final RegExp regex = RegExp(r'(\d{1,2}):(\d{2})(AM|PM)?');
+      String clean = timeStr.trim().toUpperCase()
+          .replaceAll('.', ':')
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      final RegExp regex = RegExp(r'(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?');
       final match = regex.firstMatch(clean);
 
       if (match != null) {
-        int hour = int.parse(match.group(1)!);
-        int minute = int.parse(match.group(2)!);
-        String? period = match.group(3); 
+        int hour   = int.parse(match.group(1)!);
+        int minute = int.tryParse(match.group(2) ?? '0') ?? 0;
+        String period = match.group(3) ?? '';
+        if (period.isEmpty) {
+          period = (hour >= 1 && hour <= 7) ? 'PM' : 'AM';
+        }
         if (period == 'PM' && hour != 12) hour += 12;
         if (period == 'AM' && hour == 12) hour = 0;
+        hour   = hour.clamp(0, 23);
+        minute = minute.clamp(0, 59);
         return DateTime(now.year, now.month, now.day, hour, minute);
       }
       final format = DateFormat.jm('en_US');
@@ -649,10 +697,10 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
   }
 
   Future<void> _sendMessageAndPlaceBet(String currentSession, bool isMarketOpen) async {
-    bool isToday = _selectedDate.year == DateTime.now().year && _selectedDate.month == DateTime.now().month && _selectedDate.day == DateTime.now().day;
-    if (!isMarketOpen || !isToday) {
-      return; // Disabled from UI, extra check here
-    }
+    bool isToday = _selectedDate.year == DateTime.now().year &&
+        _selectedDate.month == DateTime.now().month &&
+        _selectedDate.day == DateTime.now().day;
+    if (!isMarketOpen || !isToday) return;
 
     String text = _inputCtrl.text;
     if (text.trim().isEmpty) return;
@@ -660,98 +708,129 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     setState(() => _sendButtonScale = 1.3);
     await Future.delayed(const Duration(milliseconds: 150));
     setState(() => _sendButtonScale = 1.0);
-
     setState(() => _isLoading = true);
 
     try {
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.uid).get();
-      Map<String, dynamic> userRatesData = {};
-      if(userDoc.exists) {
-        userRatesData = userDoc.data() as Map<String, dynamic>;
-      }
+      // --- Step 1: User doc fetch ---
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.uid)
+          .get();
+      if (!userDoc.exists) throw Exception("User not found!");
+      Map<String, dynamic> userRatesData = userDoc.data() as Map<String, dynamic>;
 
-      // STRICT VALIDATION
+      // --- Step 2: Parse bets ---
       List<Map<String, dynamic>> parsedBets = _parseBets(text, currentSession, userRatesData);
-      
       if (parsedBets.isEmpty) {
         throw Exception("कृपया सही फॉर्मेट में बिड टाइप करें! (e.g. 145*10)");
       }
-
       int msgTotal = parsedBets.fold(0, (sum, item) => sum + (item['amount'] as int));
 
+      // --- Step 3: Limit check ---
+      int currentLimit = (userRatesData['limit'] ?? userRatesData['creditLimit'] ?? 0).toInt();
+      if (currentLimit < msgTotal) {
+        throw Exception("तुम्हारी लिमिट ख़तम हो गयी है! (Insufficient Limit)");
+      }
+
+      // --- Step 4: Game settings validate ---
+      String adminId = (userRatesData['createdBy'] ?? '').toString();
+      if (adminId.isEmpty) throw Exception("Admin ID nahi mila. Admin se contact karo.");
+
+      final settingsDoc = await FirebaseFirestore.instance
+          .collection('game_settings')
+          .doc('${adminId}_${widget.gameId}')
+          .get();
+      if (!settingsDoc.exists) throw Exception("Market settings nahi mili. Admin se contact karo.");
+
+      final sData = settingsDoc.data() as Map<String, dynamic>;
+      if (sData['isClosed'] == true) throw Exception("मार्केट फिलहाल बंद है! (Market Closed by Admin)");
+
+      bool openLocked  = sData['openLocked']  == true;
+      bool closeLocked = sData['closeLocked'] == true;
+      DateTime now = DateTime.now();
+      DateTime oStart = _parseTime(sData['openBetStart']  ?? '09:00 AM', now);
+      DateTime oEnd   = _parseTime(sData['openBetEnd']    ?? '11:00 AM', now);
+      DateTime cStart = _parseTime(sData['closeBetStart'] ?? '12:00 PM', now);
+      DateTime cEnd   = _parseTime(sData['closeBetEnd']   ?? '02:00 PM', now);
+
+      bool stillOpen = false;
+      // FIX: Close ko priority do — agar close start ho gaya to open overlap ignore karo
+      if (now.isAfter(cStart) && now.isBefore(cEnd) && !closeLocked)       stillOpen = true;
+      else if (now.isAfter(oStart) && now.isBefore(oEnd) && !openLocked)   stillOpen = true;
+      else if (openLocked && !closeLocked)                                  stillOpen = true;
+      if (!stillOpen) throw Exception("मार्केट का समय समाप्त हो गया है! (Time Over)");
+
+      // --- Step 5: Re-fetch latest limit with fresh get (race condition avoid) ---
+      DocumentSnapshot freshUserSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.uid)
+          .get();
+      if (!freshUserSnap.exists) throw Exception("User not found!");
+      Map<String, dynamic> freshData = freshUserSnap.data() as Map<String, dynamic>;
+      int freshLimit = (freshData['limit'] ?? freshData['creditLimit'] ?? 0).toInt();
+      if (freshLimit < msgTotal) {
+        throw Exception("तुम्हारी लिमिट ख़तम हो गयी है! (Insufficient Limit)");
+      }
+
+      // --- Step 6: WriteBatch use karo (Web par transaction se zyada reliable) ---
       final userRef = FirebaseFirestore.instance.collection('users').doc(widget.uid);
       final chatRef = userRef.collection('game_chats').doc();
-      String newChatId = chatRef.id;
+      final String newChatId = chatRef.id;
 
-      await FirebaseFirestore.instance.runTransaction((transaction) async {
-        DocumentSnapshot gameSnap = await transaction.get(FirebaseFirestore.instance.collection('games').doc(widget.gameId));
-        if (gameSnap.exists) {
-          var gData = gameSnap.data() as Map<String, dynamic>;
-          if (gData['isClosed'] == true) throw Exception("मार्केट फिलहाल बंद है! (Market Closed by Admin)");
-          
-          DateTime now = DateTime.now();
-          DateTime oStart = _parseTime(gData['openBetStart'] ?? '09:00 AM', now);
-          DateTime oEnd = _parseTime(gData['openBetEnd'] ?? '10:00 AM', now);
-          DateTime cStart = _parseTime(gData['closeBetStart'] ?? '12:00 PM', now);
-          DateTime cEnd = _parseTime(gData['closeBetEnd'] ?? '02:00 PM', now);
+      WriteBatch batch = FirebaseFirestore.instance.batch();
 
-          bool stillOpen = false;
-          if (now.isAfter(oStart) && now.isBefore(oEnd)) stillOpen = true;
-          else if (now.isAfter(cStart) && now.isBefore(cEnd)) stillOpen = true;
+      // Limit deduct karo
+      batch.update(userRef, {'limit': freshLimit - msgTotal});
 
-          if (!stillOpen) throw Exception("मार्केट का समय समाप्त हो गया है! (Time Over)");
-        }
-
-        DocumentSnapshot userSnap = await transaction.get(userRef);
-        if (!userSnap.exists) throw Exception("User not found!");
-
-        var uData = userSnap.data() as Map<String, dynamic>;
-        
-        int currentLimit = (uData['limit'] ?? uData['creditLimit'] ?? 0).toInt();
-
-        if (currentLimit < msgTotal) {
-          throw Exception("तुम्हारी लिमिट ख़तम हो गयी है! (Insufficient Limit)");
-        }
-
-        transaction.update(userRef, {
-           'limit': currentLimit - msgTotal
-        });
-
-        for (var bet in parsedBets) {
-          DocumentReference betRef = FirebaseFirestore.instance.collection('bets').doc();
-          transaction.set(betRef, {
-            'chatId': newChatId, 
-            'userId': widget.uid,
-            'gameId': widget.gameId,
-            'gameName': widget.gameName,
-            'betType': bet['betType'],
-            'session': currentSession,
-            'number': bet['number'],
-            'amount': bet['amount'],
-            'rate': bet['rate'],
-            'potentialWin': (bet['amount'] as int) * (bet['rate'] as int),
-            'status': 'pending',
-            'timestamp': FieldValue.serverTimestamp(),
-          });
-        }
-
-        transaction.set(chatRef, {
+      // Har bet save karo
+      for (var bet in parsedBets) {
+        DocumentReference betRef = FirebaseFirestore.instance.collection('bets').doc();
+        batch.set(betRef, {
           'chatId': newChatId,
+          'userId': widget.uid,
           'gameId': widget.gameId,
-          'text': text.trim(),
-          'total': msgTotal,
+          'gameName': widget.gameName,
+          'betType': bet['betType'],
+          'session': currentSession,
+          'number': bet['number'],
+          'amount': bet['amount'],
+          'rate': bet['rate'],
+          'potentialWin': (bet['amount'] as int) * (bet['rate'] as int),
+          'status': 'pending',
           'timestamp': FieldValue.serverTimestamp(),
         });
+      }
+
+      // Chat doc save karo
+      batch.set(chatRef, {
+        'chatId': newChatId,
+        'gameId': widget.gameId,
+        'text': text.trim(),
+        'total': msgTotal,
+        'session': currentSession, // FIX: session field save karo taaki badge sahi dikhe
+        'timestamp': FieldValue.serverTimestamp(),
       });
+
+      await batch.commit();
 
       if (mounted) {
         _inputCtrl.clear();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(widget.t('success_bets')), backgroundColor: kSuccess));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(widget.t('success_bets')), backgroundColor: kSuccess),
+        );
       }
     } catch (e) {
       if (mounted) {
         String errMsg = e.toString().replaceAll("Exception:", "").trim();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(errMsg), backgroundColor: Colors.red, duration: const Duration(seconds: 4)));
+        // Flutter Web par actual error message extract karo
+        if (errMsg.contains('converted Future') || errMsg.isEmpty) {
+          errMsg = "Bid lagane mein error aaya. Kripya dobara try karein.";
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(errMsg),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+        ));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -1007,8 +1086,15 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
       String trimmed = line.trim();
       if (trimmed.isEmpty) continue;
       // WhatsApp full header: "[3/11, 7:52 PM] Name: bids" or "[3/9, 23:45] +91 70666: bids"
-      // Bracket can contain digits, slash, comma, space, colon, letters (AM/PM)
-      if (RegExp(r'^\[.+?\]\s*[^:]+:').hasMatch(trimmed)) continue;
+      // FIX: header ke baad ka bid part nikalo aur display karo (puri line skip mat karo)
+      final waHeaderMatch = RegExp(r'^\[.+?\]\s*[^:]+:(.*)').firstMatch(trimmed);
+      if (waHeaderMatch != null) {
+        String afterColon = waHeaderMatch.group(1)?.trim() ?? '';
+        if (afterColon.isNotEmpty && afterColon.contains(RegExp(r'\d'))) {
+          filtered.add(afterColon); // sirf bid part dikhao, metadata hatao
+        }
+        continue;
+      }
       // Standalone mobile number lines (e.g. +91 70666 68122)
       if (RegExp(r'^\+?\d[\d\s\-]{8,}$').hasMatch(trimmed)) continue;
       // Lines that are purely letters (game name headers like "Kalyan Night Close") skip
@@ -1040,8 +1126,9 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
       }
 
       // FIX: Treat ALL special characters as separators (same as space)
+      // [^a-zA-Z0-9\s] = every char that is NOT letter/digit/space → replace with space
       String lineNormalized = processLine
-          .replaceAll(RegExp(r'[!@#\$%\^&\*,;:|\/\\~`\(\)\[\]\{\}\+\-xX]+'), ' ')
+          .replaceAll(RegExp(r'[^a-zA-Z0-9\s]+'), ' ')
           .trim();
 
       String line = lineNormalized.toLowerCase();
@@ -1081,11 +1168,8 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
               currentAmount = amount;
               if (!lineHasModeStr) currentMode = null;
               for (int i = 0; i < numParts.length - 1; i++) {
-                int preCount = finalBets.length;
-                _addParsedBet(finalBets, numParts[i], currentAmount, currentMode, session, userRates);
-                if (finalBets.length == preCount) {
-                  errors.add(_zeroBidError(numParts[i]) ?? "ग़लत बिड: ${numParts[i]}");
-                }
+                String? err = _addParsedBet(finalBets, numParts[i], currentAmount, currentMode, session, userRates);
+                if (err != null) errors.add(err);
               }
             }
           }
@@ -1112,11 +1196,8 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
       if (parts.length == 1) {
         int number = int.tryParse(parts[0]) ?? -1;
         if (number >= 0 && currentAmount > 0) {
-          int preCount = finalBets.length;
-          _addParsedBet(finalBets, parts[0], currentAmount, currentMode, session, userRates);
-          if (finalBets.length == preCount) {
-             errors.add(_zeroBidError(parts[0]) ?? "ग़लत बिड/पाना: $originalLine");
-          }
+          String? err = _addParsedBet(finalBets, parts[0], currentAmount, currentMode, session, userRates);
+          if (err != null) errors.add(err);
         } else {
           errors.add("अमाउंट नहीं डाला गया: $originalLine");
         }
@@ -1128,11 +1209,8 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
              currentMode = null; 
           }
           for (int i = 0; i < parts.length - 1; i++) {
-            int preCount = finalBets.length;
-            _addParsedBet(finalBets, parts[i], currentAmount, currentMode, session, userRates);
-            if (finalBets.length == preCount) {
-               errors.add(_zeroBidError(parts[i]) ?? "ग़लत बिड/पाना: ${parts[i]}");
-            }
+            String? err = _addParsedBet(finalBets, parts[i], currentAmount, currentMode, session, userRates);
+            if (err != null) errors.add(err);
           }
         } else {
            errors.add("अमाउंट ग़लत है: $originalLine");
@@ -1147,65 +1225,81 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
     return finalBets;
   }
 
-  void _addParsedBet(List<Map<String, dynamic>> bets, String numStr, int amount, String? mode, String session, Map<String, dynamic> userRates) {
-    if (numStr.length == 3 && RegExp(r'^\d+$').hasMatch(numStr)) {
-       if (!_isValidPanna(numStr)) {
-         return; 
-       }
-    }
+  // Returns null on success, or an error string if bet is invalid.
+  // Never silently skips — every invalid input gets an error message.
+  String? _addParsedBet(List<Map<String, dynamic>> bets, String numStr, int amount, String? mode, String session, Map<String, dynamic> userRates) {
 
     int spRate = (userRates['spRate'] as num?)?.toInt() ?? (userRates['panelRate'] as num?)?.toInt() ?? 160;
     int dpRate = (userRates['dpRate'] as num?)?.toInt() ?? 320;
     int tpRate = (userRates['tpRate'] as num?)?.toInt() ?? 1000;
-    int jRate = (userRates['jodiRate'] as num?)?.toInt() ?? 100;
+    int jRate  = (userRates['jodiRate'] as num?)?.toInt() ?? 100;
     int singleRate = (userRates['singleRate'] as num?)?.toInt() ?? 10;
 
-    bool generatedFromMode = false;
-
-    if (mode == 'fm' && numStr.length == 3) {
-      bets.addAll(_generateFamilyBets(numStr, amount, spRate, dpRate, tpRate));
-      generatedFromMode = true;
-    } else if (mode == 'sp' || mode == 'dp' || mode == 'tp') {
-      int digit = int.tryParse(numStr) ?? -1;
-      if (digit >= 0 && digit <= 9) {
-        bets.addAll(_generatePannaBets(digit, mode!, amount, spRate, dpRate, tpRate));
-        generatedFromMode = true;
+    // --- MODE-BASED BETS (sp / dp / tp / fm) ---
+    if (mode == 'fm') {
+      if (numStr.length == 3 && RegExp(r'^\d+$').hasMatch(numStr)) {
+        // Sort before FM generation
+        List<int> digs = numStr.split('').map((c) => int.parse(c)).toList();
+        List<int> nz = List<int>.from(digs.where((d) => d != 0))..sort();
+        List<int> zs = List.filled(digs.where((d) => d == 0).length, 0);
+        String sorted = (nz + zs).join();
+        if (!_isValidPanna(sorted)) return "❌ Invalid panna: $numStr";
+        bets.addAll(_generateFamilyBets(sorted, amount, spRate, dpRate, tpRate));
+        return null;
       }
-    } 
-    
-    if (!generatedFromMode) {
-      if (RegExp(r'^\d+$').hasMatch(numStr)) {
-        String processedNumStr = numStr;
-        String type = _detectBetType(processedNumStr);
+      return "❌ FM ke liye 3-digit panna chahiye: $numStr";
+    }
 
-        // 0 से शुरू या सिर्फ 0 — ERROR दो, skip नहीं
-        // Single digit "0" → invalid
-        // '0' single digit VALID hai — matka mein 0-9 sab valid hain
-        // Panna 0 से शुरू → INVALID (except 000 which is valid Triple Panna for digit 0)
-        if ((type == 'Single Panna' || type == 'Double Panna' || type == 'Triple Panna') && processedNumStr.startsWith('0') && processedNumStr != '000') {
-          return;
-        }
+    if (mode == 'sp' || mode == 'dp' || mode == 'tp') {
+      int digit = int.tryParse(numStr) ?? -1;
+      if (digit < 0 || digit > 9) {
+        return "❌ ${mode!.toUpperCase()} ke liye sirf 0-9 single digit chahiye, mila: $numStr";
+      }
+      bets.addAll(_generatePannaBets(digit, mode!, amount, spRate, dpRate, tpRate));
+      return null;
+    }
 
-        if (type == 'Jodi Digit' && session == 'Close') {
-          return; 
-        }
+    // --- DIRECT BET (no mode) ---
+    if (!RegExp(r'^\d+$').hasMatch(numStr)) {
+      return "❌ Invalid number: $numStr";
+    }
 
-        if (type != 'Unknown') {
-          int applyRate = singleRate;
-          if (type == 'Jodi Digit') applyRate = jRate;
-          else if (type == 'Single Panna') applyRate = spRate;
-          else if (type == 'Double Panna') applyRate = dpRate;
-          else if (type == 'Triple Panna') applyRate = tpRate;
-
-          bets.add({
-            'number': processedNumStr, 
-            'amount': amount,
-            'betType': type,
-            'rate': applyRate
-          });
-        }
+    // 3-digit panna: sort karo aur validate karo
+    String processedNumStr = numStr;
+    if (numStr.length == 3) {
+      List<int> digs = numStr.split('').map((c) => int.parse(c)).toList();
+      List<int> nz = List<int>.from(digs.where((d) => d != 0))..sort();
+      List<int> zs = List.filled(digs.where((d) => d == 0).length, 0);
+      processedNumStr = (nz + zs).join();
+      if (!_isValidPanna(processedNumStr)) {
+        return "❌ Galat panna: $numStr (yeh valid matka panna nahi hai)";
       }
     }
+
+    String type = _detectBetType(processedNumStr);
+
+    if (type == 'Unknown') {
+      return "❌ Galat number (4+ digits allowed nahi): $numStr";
+    }
+
+    // Close session mein Jodi allowed nahi
+    if (type == 'Jodi Digit' && session == 'Close') {
+      return "❌ Jodi ($processedNumStr) Close session mein nahi lagti — sirf Open session mein lagaye";
+    }
+
+    int applyRate = singleRate;
+    if (type == 'Jodi Digit')    applyRate = jRate;
+    else if (type == 'Single Panna') applyRate = spRate;
+    else if (type == 'Double Panna') applyRate = dpRate;
+    else if (type == 'Triple Panna') applyRate = tpRate;
+
+    bets.add({
+      'number': processedNumStr,
+      'amount': amount,
+      'betType': type,
+      'rate': applyRate,
+    });
+    return null;
   }
 
   List<Map<String, dynamic>> _generateFamilyBets(String panna, int amount, int spRate, int dpRate, int tpRate) {
@@ -1316,9 +1410,22 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
   Widget build(BuildContext context) {
     bool isToday = _selectedDate.year == DateTime.now().year && _selectedDate.month == DateTime.now().month && _selectedDate.day == DateTime.now().day;
 
+    // Pehle user ka adminId fetch karo, phus us admin ki game_settings fetch karo
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('games').doc(widget.gameId).snapshots(),
-      builder: (context, gameSnapshot) {
+      stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
+      builder: (context, userSnap) {
+        String adminId = '';
+        if (userSnap.hasData && userSnap.data!.exists) {
+          adminId = (userSnap.data!.data() as Map<String, dynamic>)['createdBy']?.toString() ?? '';
+        }
+        if (adminId.isEmpty) return const Center(child: CircularProgressIndicator(color: kPrimary));
+
+        return StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('game_settings')
+              .doc('${adminId}_${widget.gameId}')
+              .snapshots(),
+          builder: (context, gameSnapshot) {
         
         String sessionDisplay = 'Closed';
         bool isMarketOpen = false;
@@ -1326,19 +1433,28 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
 
         if (gameSnapshot.hasData && gameSnapshot.data!.exists) {
            var gData = gameSnapshot.data!.data() as Map<String, dynamic>;
-           titleName = gData['name'] ?? widget.gameName;
+           titleName = gData['gameName'] ?? widget.gameName;
 
-           if (gData['isClosed'] != true) {
+           bool isClosed   = gData['isClosed']    == true;
+           bool openLocked = gData['openLocked']  == true;
+           bool closeLocked= gData['closeLocked'] == true;
+
+           if (!isClosed) {
               DateTime now = DateTime.now();
-              DateTime oStart = _parseTime(gData['openBetStart'] ?? '09:00 AM', now);
-              DateTime oEnd = _parseTime(gData['openBetEnd'] ?? '10:00 AM', now);
+              DateTime oStart = _parseTime(gData['openBetStart']  ?? '09:00 AM', now);
+              DateTime oEnd   = _parseTime(gData['openBetEnd']    ?? '11:00 AM', now);
               DateTime cStart = _parseTime(gData['closeBetStart'] ?? '12:00 PM', now);
-              DateTime cEnd = _parseTime(gData['closeBetEnd'] ?? '02:00 PM', now);
+              DateTime cEnd   = _parseTime(gData['closeBetEnd']   ?? '02:00 PM', now);
 
-              if (now.isAfter(oStart) && now.isBefore(oEnd)) {
+              // FIX: Close ko priority do — agar close start ho gaya to Open overlap ignore karo
+              if (now.isAfter(cStart) && now.isBefore(cEnd) && !closeLocked) {
+                sessionDisplay = 'Close';
+                isMarketOpen = true;
+              } else if (now.isAfter(oStart) && now.isBefore(oEnd) && !openLocked) {
                 sessionDisplay = 'Open';
                 isMarketOpen = true;
-              } else if (now.isAfter(cStart) && now.isBefore(cEnd)) {
+              } else if (openLocked && !closeLocked) {
+                // Admin ne manually open lock kiya → force Close session
                 sessionDisplay = 'Close';
                 isMarketOpen = true;
               }
@@ -1346,21 +1462,24 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
         }
 
         bool canBet = isMarketOpen && isToday;
-        // Session-specific edit/delete control:
-        // openSessionActive = true means Open bets can be edited/deleted
-        // closeSessionActive = true means Close bets can be edited/deleted
         bool openSessionActive = false;
         bool closeSessionActive = false;
         if (gameSnapshot.hasData && gameSnapshot.data!.exists) {
           var gData2 = gameSnapshot.data!.data() as Map<String, dynamic>;
-          if (gData2['isClosed'] != true) {
+          bool isClosed2    = gData2['isClosed']    == true;
+          bool openLocked2  = gData2['openLocked']  == true;
+          bool closeLocked2 = gData2['closeLocked'] == true;
+          if (!isClosed2) {
             DateTime now2 = DateTime.now();
-            DateTime oStart2 = _parseTime(gData2['openBetStart'] ?? '09:00 AM', now2);
-            DateTime oEnd2 = _parseTime(gData2['openBetEnd'] ?? '10:00 AM', now2);
+            DateTime oStart2 = _parseTime(gData2['openBetStart']  ?? '09:00 AM', now2);
+            DateTime oEnd2   = _parseTime(gData2['openBetEnd']    ?? '11:00 AM', now2);
             DateTime cStart2 = _parseTime(gData2['closeBetStart'] ?? '12:00 PM', now2);
-            DateTime cEnd2 = _parseTime(gData2['closeBetEnd'] ?? '02:00 PM', now2);
-            openSessionActive = now2.isAfter(oStart2) && now2.isBefore(oEnd2);
-            closeSessionActive = now2.isAfter(cStart2) && now2.isBefore(cEnd2);
+            DateTime cEnd2   = _parseTime(gData2['closeBetEnd']   ?? '02:00 PM', now2);
+            // FIX: Close ko priority do
+            closeSessionActive = (now2.isAfter(cStart2) && now2.isBefore(cEnd2) && !closeLocked2)
+                               || (openLocked2 && !closeLocked2);
+            openSessionActive  = !closeSessionActive 
+                               && now2.isAfter(oStart2) && now2.isBefore(oEnd2) && !openLocked2;
           }
         }
 
@@ -1463,15 +1582,15 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                         var data = docs[index].data() as Map<String, dynamic>;
                         var time = (data['timestamp'] as Timestamp?)?.toDate();
                         String timeStr = time != null ? DateFormat('hh:mm a').format(time) : '';
+                        String betSession = (data['session'] ?? 'Open').toString();
+                        bool isOpenSession = betSession == 'Open';
 
                         return Align(
                           alignment: Alignment.centerRight,
                           child: ConstrainedBox(
-                            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                            constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
                             child: GestureDetector(
                               onLongPress: () {
-                                // Determine if this specific bet can be edited based on its session
-                                String betSession = (data['session'] ?? 'Open').toString();
                                 bool canEditThisBet = isToday && (
                                   (betSession == 'Open' && openSessionActive) ||
                                   (betSession == 'Close' && closeSessionActive)
@@ -1481,24 +1600,86 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
                               child: Card(
                                 color: kWABubbleSelf,
                                 elevation: 1,
-                                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.only(topLeft: Radius.circular(10), bottomLeft: Radius.circular(10), bottomRight: Radius.circular(10))),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: const BorderRadius.only(
+                                    topLeft: Radius.circular(10),
+                                    bottomLeft: Radius.circular(10),
+                                    bottomRight: Radius.circular(10),
+                                  ),
+                                  side: BorderSide(
+                                    color: isOpenSession
+                                        ? Colors.green.withOpacity(0.5)
+                                        : Colors.orange.withOpacity(0.5),
+                                    width: 1.2,
+                                  ),
+                                ),
                                 margin: const EdgeInsets.only(bottom: 8),
                                 child: Padding(
                                   padding: const EdgeInsets.all(10),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.end,
                                     children: [
-                                      Text(_filterDisplayText(data['text'] ?? ''), style: const TextStyle(color: kTextMain, fontSize: 16)),
+                                      // ── Session Badge ──────────────────
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: isOpenSession
+                                                  ? Colors.green.withOpacity(0.15)
+                                                  : Colors.orange.withOpacity(0.15),
+                                              borderRadius: BorderRadius.circular(20),
+                                              border: Border.all(
+                                                color: isOpenSession ? Colors.green : Colors.orange,
+                                                width: 1,
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  isOpenSession ? Icons.wb_sunny_rounded : Icons.nights_stay_rounded,
+                                                  size: 11,
+                                                  color: isOpenSession ? Colors.green.shade700 : Colors.orange.shade700,
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  isOpenSession ? 'OPEN SESSION' : 'CLOSE SESSION',
+                                                  style: TextStyle(
+                                                    color: isOpenSession ? Colors.green.shade700 : Colors.orange.shade700,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    letterSpacing: 0.5,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      // ── Bet text ───────────────────────
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Text(
+                                          _filterDisplayText(data['text'] ?? ''),
+                                          style: const TextStyle(color: kTextMain, fontSize: 16),
+                                        ),
+                                      ),
                                       const SizedBox(height: 5),
                                       const Divider(color: Colors.black12, height: 10),
                                       Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Text("Done | Game Amt- ${data['total']}.00", style: const TextStyle(color: kPurpleLedger, fontSize: 13, fontWeight: FontWeight.bold)), 
+                                          Text(
+                                            "Done | Game Amt- ${data['total']}.00",
+                                            style: const TextStyle(color: kPurpleLedger, fontSize: 13, fontWeight: FontWeight.bold),
+                                          ),
                                           const SizedBox(width: 8),
                                           Text(timeStr, style: const TextStyle(color: kTextSub, fontSize: 10)),
                                         ],
-                                      )
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -1568,6 +1749,8 @@ class _ChartBettingScreenState extends State<ChartBettingScreen> {
         );
       }
     );
+      }
+    );
   }
 }
 
@@ -1616,8 +1799,17 @@ class LedgerTab extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('games').orderBy('order').snapshots(),
+          child: StreamBuilder<DocumentSnapshot>(
+            stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+            builder: (context, userSnap) {
+              String adminId = '';
+              if (userSnap.hasData && userSnap.data!.exists) {
+                adminId = (userSnap.data!.data() as Map<String, dynamic>)['createdBy']?.toString() ?? '';
+              }
+              if (adminId.isEmpty) return const Center(child: CircularProgressIndicator(color: kPrimary));
+              return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('game_settings')
+                .where('adminId', isEqualTo: adminId).snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator(color: kPrimary));
               
@@ -1637,12 +1829,13 @@ class LedgerTab extends StatelessWidget {
                 itemBuilder: (context, index) {
                   var doc = snapshot.data!.docs[index];
                   var data = doc.data() as Map<String, dynamic>;
-                  String gameName = data['name'] ?? '';
+                  String gameName = data['gameName'] ?? data['name'] ?? '';
+                  String gameId   = data['gameId']   ?? doc.id;
                   String hindiName = _getHindiName(gameName);
                   
                   return GestureDetector(
                     onTap: () {
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => GameLedgerScreen(uid: uid, gameId: doc.id, gameName: gameName, t: t)));
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => GameLedgerScreen(uid: uid, gameId: gameId, gameName: gameName, t: t)));
                     },
                     child: Container(
                       decoration: BoxDecoration(
@@ -1675,6 +1868,8 @@ class LedgerTab extends StatelessWidget {
                   );
                 },
               );
+            },
+          );
             },
           ),
         ),
@@ -1752,6 +1947,7 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
     required Map<String, Map<String, double>> gameStats,
     required double totalDhanda,
     required double totalPayment,
+    required double totalLoss,
     required double commission,
     required double baki,
     required double maagilJama,
@@ -1829,18 +2025,45 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                 pw.Expanded(flex: 2, child: pw.Text(totalPayment.toStringAsFixed(2), textAlign: pw.TextAlign.right, style: mrStyle(bold: true, color: PdfColors.red800))),
               ]),
               pw.SizedBox(height: 8),
-              // Winning Amount Row
-              pw.Container(
-                color: PdfColors.purple50,
-                padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text("Winning Amount / जिंकलेली रक्कम", style: mrStyle(bold: true, color: PdfColors.purple, fontSize: 13)),
-                    pw.Text("Rs. ${totalPayment.toStringAsFixed(0)}", style: mrStyle(bold: true, color: PdfColors.purple, fontSize: 13)),
-                  ],
+
+              // ---- DYNAMIC WIN/LOSS AMOUNT ROW ----
+              if (totalPayment > 0)
+                pw.Container(
+                  color: PdfColors.green50,
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text("Winning Amount / जिंकलेली रक्कम", style: mrStyle(bold: true, color: PdfColors.green800, fontSize: 13)),
+                      pw.Text("Rs. ${totalPayment.toStringAsFixed(0)}", style: mrStyle(bold: true, color: PdfColors.green800, fontSize: 13)),
+                    ],
+                  ),
+                )
+              else if (totalLoss > 0)
+                pw.Container(
+                  color: PdfColors.red50,
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text("Loss Amount / गमावलेली रक्कम", style: mrStyle(bold: true, color: PdfColors.red800, fontSize: 13)),
+                      pw.Text("Rs. ${totalLoss.toStringAsFixed(0)}", style: mrStyle(bold: true, color: PdfColors.red800, fontSize: 13)),
+                    ],
+                  ),
+                )
+              else 
+                pw.Container(
+                  color: PdfColors.orange50,
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text("Result Pending / निकाल प्रलंबित", style: mrStyle(bold: true, color: PdfColors.orange800, fontSize: 13)),
+                      pw.Text("Rs. 0", style: mrStyle(bold: true, color: PdfColors.orange800, fontSize: 13)),
+                    ],
+                  ),
                 ),
-              ),
+              
               pw.SizedBox(height: 8),
               pw.Container(
                 color: PdfColors.purple,
@@ -1947,7 +2170,7 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
         // --- User data ---
         String userName = "User";
         double thakbaki = 0.0;    // Previous outstanding balance (manually set by admin)
-        double commissionPct = 10.0;
+        double commissionPct = 0.0;
 
         if (userSnap.hasData && userSnap.data!.exists) {
           final uData = userSnap.data!.data() as Map<String, dynamic>;
@@ -2047,17 +2270,27 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
 
               // --- Aggregate per game ---
               final Map<String, Map<String, double>> gameStats = {};
+              double totalLossAmount = 0.0; // Track amount lost for today's bets
 
               for (final doc in filteredDocs) {
                 final data = doc.data() as Map<String, dynamic>;
                 final String game = data['gameName'] ?? 'Unknown';
                 final double amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
+                
+                // Track loss
+                if (data['status'] == 'loss') {
+                  totalLossAmount += amount;
+                }
+
                 // Payment only from WON bets — updates live when admin declares result
                 final double payment = data['status'] == 'won'
                     ? (data['potentialWin'] as num?)?.toDouble() ?? 0.0
                     : 0.0;
-                // Winning = potentialWin for ALL bets (won + pending)
-                final double winning = (data['potentialWin'] as num?)?.toDouble() ?? 0.0;
+                    
+                // BUG FIX: Winning Amount should ONLY include won bets, NOT lost or pending bets
+                final double winning = data['status'] == 'won' 
+                    ? (data['potentialWin'] as num?)?.toDouble() ?? 0.0 
+                    : 0.0;
 
                 gameStats.putIfAbsent(game, () => {'dhanda': 0.0, 'payment': 0.0, 'winning': 0.0});
                 gameStats[game]!['dhanda'] = gameStats[game]!['dhanda']! + amount;
@@ -2106,17 +2339,21 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
 
                       if (dt.isAfter(selStart) && dt.isBefore(selEnd)) {
                         // Today's transactions
-                        if (type == 'deduct') {
+                        // vasuli = agent ne cash diya admin ko  → outstanding GHATTA (agent ka debt kam)
+                        // vatap  = admin ne win ka paisa diya   → outstanding BADHTA (admin ko aur dena tha)
+                        if (type == 'vasuli' || type == 'deduct') {
                           vasuli += amt.abs();
-                        } else if (type == 'win_paid' || type == 'add') {
+                        } else if (type == 'vatap' || type == 'win_paid' || type == 'add') {
                           vatap += amt.abs();
                         }
                       } else if (dt.isBefore(selStart)) {
                         // Previous days transactions — thakbaki adjust karo
-                        if (type == 'deduct') {
-                          prevVasuli += amt.abs(); // agent ne diya tha → thakbaki kam hoga
-                        } else if (type == 'win_paid' || type == 'add') {
-                          prevVatap += amt.abs();  // admin ne diya tha → thakbaki badhega
+                        // prevVasuli: agent ne pehle cash diya tha → running outstanding GHATTA
+                        // prevVatap:  admin ne pehle paisa diya tha → running outstanding BADHTA
+                        if (type == 'vasuli' || type == 'deduct') {
+                          prevVasuli += amt.abs();
+                        } else if (type == 'vatap' || type == 'win_paid' || type == 'add') {
+                          prevVatap += amt.abs();
                         }
                       }
                     }
@@ -2227,27 +2464,68 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                         _buildCalcRow('कमिशन (${commissionPct.toStringAsFixed(0)}%)', commission, null),
                         _buildCalcRow(t('total'), netDhanda, totalPayment, isBold: true),
 
-                        // ---- WINNING AMOUNT ROW ----
+                        // ---- DYNAMIC WINNING / LOSS AMOUNT ROW ----
                         const SizedBox(height: 6),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: Colors.purple.shade50,
-                            border: Border.all(color: Colors.purple.shade300, width: 1.5),
-                            borderRadius: BorderRadius.circular(8),
+                        if (totalWinning > 0)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              border: Border.all(color: Colors.green.shade300, width: 1.5),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('🏆 Winning Amount', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 15)),
+                                Text(
+                                  '₹ ${totalWinning.toStringAsFixed(0)}',
+                                  style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 17),
+                                ),
+                              ],
+                            ),
+                          )
+                        else if (totalLossAmount > 0)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              border: Border.all(color: Colors.red.shade300, width: 1.5),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('💔 Loss Amount', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 15)),
+                                Text(
+                                  '₹ ${totalLossAmount.toStringAsFixed(0)}',
+                                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 17),
+                                ),
+                              ],
+                            ),
+                          )
+                        else 
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              border: Border.all(color: Colors.orange.shade300, width: 1.5),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: const [
+                                Text('⏳ Result Pending', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 15)),
+                                Text(
+                                  '₹ 0',
+                                  style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 17),
+                                ),
+                              ],
+                            ),
                           ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text('🏆 Winning Amount', style: TextStyle(color: Colors.purple, fontWeight: FontWeight.bold, fontSize: 15)),
-                              Text(
-                                '₹ ${totalWinning.toStringAsFixed(0)}',
-                                style: const TextStyle(color: Colors.purple, fontWeight: FontWeight.bold, fontSize: 17),
-                              ),
-                            ],
-                          ),
-                        ),
 
                         const SizedBox(height: 12),
 
@@ -2435,6 +2713,7 @@ class _DaySlipScreenState extends State<DaySlipScreen> {
                               gameStats: gameStats,
                               totalDhanda: totalDhanda,
                               totalPayment: totalPayment,
+                              totalLoss: totalLossAmount, // Passing totalLoss here
                               commission: commission,
                               baki: aajchiBaki,
                               maagilJama: finalThakbaki,
@@ -2518,10 +2797,23 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
             fontWeight: isBold ? FontWeight.bold : FontWeight.normal
           )),
           if (betAmount != null)
-            // Sirf WIN amount dikhao — bet amount nahi
-            Text(
-              amount > 0 ? "= Rs.${amount.toStringAsFixed(0)}" : "= Rs.0",
-              style: const TextStyle(fontSize: 15, color: Colors.black54),
+            // Bet amount AND win amount dono dikhao
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  "Bet: Rs.${betAmount!.toStringAsFixed(0)}",
+                  style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500),
+                ),
+                Text(
+                  amount > 0 ? "- Rs.${amount.toStringAsFixed(0)}" : "- Rs.0",
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: amount > 0 ? const Color(0xFFD32F2F) : Colors.black54,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             )
           else
             Text(
@@ -2589,7 +2881,7 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
         String headerName = "Loading...";
         String headerResult = "---";
         double maagilJama = 0.0;
-        double customComm = 0.10;
+        double customComm = 0.0;
 
         if (userSnapshot.hasData && userSnapshot.data!.exists) {
           var uData = userSnapshot.data!.data() as Map<String, dynamic>;
@@ -2665,23 +2957,26 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
               // --- ALSO fetch game result for header display ---
               // Aggregate calculations
               double openDhanda = 0, closeDhanda = 0;
-              double openSinglePay = 0, openSingleBet = 0;
-              double closeSinglePay = 0, closeSingleBet = 0;
-              double closeSPPay = 0, closeSPBet = 0;
-              double closeDPPay = 0, closeDPBet = 0;
-              double closeTPPay = 0, closeTPBet = 0;
-              double jodiPay = 0, jodiBet = 0;
+              double openSinglePay = 0, openSingleBet = 0, openSingleWinBet = 0;
+              double closeSinglePay = 0, closeSingleBet = 0, closeSingleWinBet = 0;
+              double closeSPPay = 0, closeSPBet = 0, closeSPWinBet = 0;
+              double closeDPPay = 0, closeDPBet = 0, closeDPWinBet = 0;
+              double closeTPPay = 0, closeTPBet = 0, closeTPWinBet = 0;
+              double jodiPay = 0, jodiBet = 0, jodiWinBet = 0;
 
               // Open Panna broken into SP/DP/TP
-              double openSPPay = 0, openSPBet = 0;
-              double openDPPay = 0, openDPBet = 0;
-              double openTPPay = 0, openTPBet = 0;
+              double openSPPay = 0, openSPBet = 0, openSPWinBet = 0;
+              double openDPPay = 0, openDPBet = 0, openDPWinBet = 0;
+              double openTPPay = 0, openTPBet = 0, openTPWinBet = 0;
 
               for (var doc in docs) {
                 var data = doc.data() as Map<String, dynamic>;
                 double amount = (data['amount'] ?? 0).toDouble();
+                bool isWon = data['status'] == 'won';
                 // Only won bets contribute to payment
-                double winAmt = data['status'] == 'won' ? (data['potentialWin'] ?? 0).toDouble() : 0.0;
+                double winAmt = isWon ? (data['potentialWin'] ?? 0).toDouble() : 0.0;
+                // winBetAmt = bet amount only for the WINNING number (for "Bet: Rs.X" display)
+                double winBetAmt = isWon ? amount : 0.0;
                 String type = data['betType'] ?? '';
                 String session = data['session'] ?? 'Open';
 
@@ -2689,19 +2984,19 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
                 else closeDhanda += amount;
 
                 if (type == 'Single Digit') {
-                  if (session == 'Open') { openSingleBet += amount; openSinglePay += winAmt; }
-                  else { closeSingleBet += amount; closeSinglePay += winAmt; }
+                  if (session == 'Open') { openSingleBet += amount; openSingleWinBet += winBetAmt; openSinglePay += winAmt; }
+                  else { closeSingleBet += amount; closeSingleWinBet += winBetAmt; closeSinglePay += winAmt; }
                 } else if (type == 'Single Panna') {
-                  if (session == 'Open') { openSPBet += amount; openSPPay += winAmt; }
-                  else { closeSPBet += amount; closeSPPay += winAmt; }
+                  if (session == 'Open') { openSPBet += amount; openSPWinBet += winBetAmt; openSPPay += winAmt; }
+                  else { closeSPBet += amount; closeSPWinBet += winBetAmt; closeSPPay += winAmt; }
                 } else if (type == 'Double Panna') {
-                  if (session == 'Open') { openDPBet += amount; openDPPay += winAmt; }
-                  else { closeDPBet += amount; closeDPPay += winAmt; }
+                  if (session == 'Open') { openDPBet += amount; openDPWinBet += winBetAmt; openDPPay += winAmt; }
+                  else { closeDPBet += amount; closeDPWinBet += winBetAmt; closeDPPay += winAmt; }
                 } else if (type == 'Triple Panna') {
-                  if (session == 'Open') { openTPBet += amount; openTPPay += winAmt; }
-                  else { closeTPBet += amount; closeTPPay += winAmt; }
+                  if (session == 'Open') { openTPBet += amount; openTPWinBet += winBetAmt; openTPPay += winAmt; }
+                  else { closeTPBet += amount; closeTPWinBet += winBetAmt; closeTPPay += winAmt; }
                 } else if (type == 'Jodi Digit') {
-                  jodiBet += amount;
+                  jodiBet += amount; jodiWinBet += winBetAmt;
                   jodiPay += winAmt;
                 }
               }
@@ -2709,8 +3004,10 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
               // Combined Panna totals for display
               double openPannaBet = openSPBet + openDPBet + openTPBet;
               double openPannaPay = openSPPay + openDPPay + openTPPay;
+              double openPannaWinBet = openSPWinBet + openDPWinBet + openTPWinBet;
               double closePannaBet = closeSPBet + closeDPBet + closeTPBet;
               double closePannaPay = closeSPPay + closeDPPay + closeTPPay;
+              double closePannaWinBet = closeSPWinBet + closeDPWinBet + closeTPWinBet;
 
               double totalDhanda = openDhanda + closeDhanda;
               double commission = totalDhanda * customComm;
@@ -2753,25 +3050,25 @@ class _GameLedgerScreenState extends State<GameLedgerScreen> {
                     // ===================== PAYMENT SECTION =====================
                     _buildSectionHeader("पेमेंट"),
                     const Divider(height: 1, color: Colors.black12, indent: 16, endIndent: 16),
-                    _buildLedgerRow("Open Single", openSinglePay, betAmount: openSingleBet),
+                    _buildLedgerRow("Open Single", openSinglePay, betAmount: openSingleWinBet),
                     if (openSPBet > 0 || openSPPay > 0)
-                      _buildLedgerRow("Open SP (Single Panna)", openSPPay, betAmount: openSPBet),
+                      _buildLedgerRow("Open SP (Single Panna)", openSPPay, betAmount: openSPWinBet),
                     if (openDPBet > 0 || openDPPay > 0)
-                      _buildLedgerRow("Open DP (Double Panna)", openDPPay, betAmount: openDPBet),
+                      _buildLedgerRow("Open DP (Double Panna)", openDPPay, betAmount: openDPWinBet),
                     if (openTPBet > 0 || openTPPay > 0)
-                      _buildLedgerRow("Open TP (Triple Panna)", openTPPay, betAmount: openTPBet),
+                      _buildLedgerRow("Open TP (Triple Panna)", openTPPay, betAmount: openTPWinBet),
                     if (openSPBet == 0 && openDPBet == 0 && openTPBet == 0)
-                      _buildLedgerRow("Open Pana", openPannaPay, betAmount: openPannaBet),
-                    _buildLedgerRow("Jodi", jodiPay, betAmount: jodiBet),
-                    _buildLedgerRow("Close Single", closeSinglePay, betAmount: closeSingleBet),
+                      _buildLedgerRow("Open Pana", openPannaPay, betAmount: openPannaWinBet),
+                    _buildLedgerRow("Jodi", jodiPay, betAmount: jodiWinBet),
+                    _buildLedgerRow("Close Single", closeSinglePay, betAmount: closeSingleWinBet),
                     if (closeSPBet > 0 || closeSPPay > 0)
-                      _buildLedgerRow("Close SP (Single Panna)", closeSPPay, betAmount: closeSPBet),
+                      _buildLedgerRow("Close SP (Single Panna)", closeSPPay, betAmount: closeSPWinBet),
                     if (closeDPBet > 0 || closeDPPay > 0)
-                      _buildLedgerRow("Close DP (Double Panna)", closeDPPay, betAmount: closeDPBet),
+                      _buildLedgerRow("Close DP (Double Panna)", closeDPPay, betAmount: closeDPWinBet),
                     if (closeTPBet > 0 || closeTPPay > 0)
-                      _buildLedgerRow("Close TP (Triple Panna)", closeTPPay, betAmount: closeTPBet),
+                      _buildLedgerRow("Close TP (Triple Panna)", closeTPPay, betAmount: closeTPWinBet),
                     if (closeSPBet == 0 && closeDPBet == 0 && closeTPBet == 0)
-                      _buildLedgerRow("Close Pana", closePannaPay, betAmount: closePannaBet),
+                      _buildLedgerRow("Close Pana", closePannaPay, betAmount: closePannaWinBet),
                     _buildLedgerRow("Commission (${(customComm * 100).toStringAsFixed(0)}%)", commission),
                     _buildLedgerRow("Fer Amount", 0.00),
                     _buildTotalRow("Total Jama", totalJama, bgColor: Colors.grey.shade100),

@@ -161,145 +161,424 @@ class _UserBidManagePageState extends State<UserBidManagePage> {
           return Dialog(
             backgroundColor: const Color(0xFF0B141A),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: SizedBox(
-              width: double.maxFinite,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Header
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF1F2C34),
-                      borderRadius: BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.85,
+              ),
+              child: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // ── Fixed Header ──────────────────────────────────────
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF1F2C34),
+                        borderRadius: BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text("मूळ चार्ट (Original Chart)", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                              Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                            ],
+                          ),
+                          IconButton(icon: const Icon(Icons.close, color: Colors.white54), onPressed: () => Navigator.pop(ctx)),
+                        ],
+                      ),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
+
+                    // ── Scrollable body ───────────────────────────────────
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text("मूळ चार्ट (Original Chart)", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                            Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                            // Original bid text
+                            Container(
+                              width: double.infinity,
+                              margin: const EdgeInsets.all(12),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(color: const Color(0xFF005D4B), borderRadius: BorderRadius.circular(12)),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text("📋 Original Bid Text:", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                                  const SizedBox(height: 6),
+                                  Text(text, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                                  const SizedBox(height: 8),
+                                  const Divider(color: Colors.white24),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text("Total: ₹$total", style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                                      Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                            // All bets section label
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.bar_chart, color: Colors.amber, size: 14),
+                                  SizedBox(width: 6),
+                                  Text("सर्व बेट्स - या तारखेसाठी (All Bets This Date):", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ),
+
+                            // Bet details table (fully expanded, no height cap)
+                            if (gameId.isNotEmpty)
+                              FutureBuilder<QuerySnapshot>(
+                                future: FirebaseFirestore.instance.collection('bets')
+                                    .where('chatId', isEqualTo: chatId)
+                                    .get(),
+                                builder: (context, betSnap) {
+                                  if (betSnap.connectionState == ConnectionState.waiting) {
+                                    return const Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: Center(child: CircularProgressIndicator(color: Colors.amber)),
+                                    );
+                                  }
+                                  if (!betSnap.hasData || betSnap.data!.docs.isEmpty) {
+                                    return const Padding(
+                                      padding: EdgeInsets.all(12),
+                                      child: Text("No bet details found", style: TextStyle(color: Colors.white54, fontSize: 12)),
+                                    );
+                                  }
+                                  var bets = betSnap.data!.docs;
+                                  return Container(
+                                    margin: const EdgeInsets.symmetric(horizontal: 12),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF1F2C34),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        // Table header row
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                          decoration: const BoxDecoration(
+                                            color: Color(0xFF2A3942),
+                                            borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+                                          ),
+                                          child: const Row(
+                                            children: [
+                                              Expanded(flex: 2, child: Text("Number", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                              Expanded(flex: 2, child: Text("Type", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                              Expanded(child: Text("₹ Amt", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                              Expanded(child: Text("Status", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                              SizedBox(width: 32, child: Text("Del", style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold))),
+                                            ],
+                                          ),
+                                        ),
+                                        // Rows — shrinkWrap so they all render inside scroll
+                                        ListView.builder(
+                                          shrinkWrap: true,
+                                          physics: const NeverScrollableScrollPhysics(),
+                                          itemCount: bets.length,
+                                          itemBuilder: (ctx, i) {
+                                            var bd = bets[i].data() as Map<String, dynamic>;
+                                            String betDocId = bets[i].id;
+                                            String betUserId = bd['userId']?.toString() ?? '';
+                                            int betAmount = int.tryParse(bd['amount']?.toString() ?? '') ?? 0;
+                                            String statusStr = bd['status'] ?? 'pending';
+                                            Color statusColor = statusStr == 'won'
+                                                ? Colors.green
+                                                : (statusStr == 'loss' ? Colors.red : Colors.orange);
+                                            return Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                              decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white12))),
+                                              child: Row(
+                                                children: [
+                                                  Expanded(flex: 2, child: Text(bd['number']?.toString() ?? '', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
+                                                  Expanded(flex: 2, child: Text(bd['betType']?.toString() ?? '', style: const TextStyle(color: Colors.white70, fontSize: 10))),
+                                                  Expanded(child: Text("₹${bd['amount']}", style: const TextStyle(color: Colors.greenAccent, fontSize: 12))),
+                                                  Expanded(child: Text(statusStr.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold))),
+                                                  SizedBox(
+                                                    width: 32,
+                                                    child: GestureDetector(
+                                                      onTap: () {
+                                                        Navigator.pop(ctx); // Dialog band karo
+                                                        _deleteBid(betDocId, betAmount, betUserId);
+                                                      },
+                                                      child: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            const SizedBox(height: 16),
                           ],
                         ),
-                        IconButton(icon: const Icon(Icons.close, color: Colors.white54), onPressed: () => Navigator.pop(ctx)),
-                      ],
+                      ),
                     ),
+
+                    // ── Fixed Close button at bottom ──────────────────────
+                    Container(
+                      width: double.infinity,
+                      decoration: const BoxDecoration(
+                        border: Border(top: BorderSide(color: Colors.white12)),
+                      ),
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text("बंद करा (Close)", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // --- NAME CLICK PAR OPEN HONE WALA DIALOG ---
+  // Original chart format SAME rakhta hai, bas saare chatIds ek saath dikhata hai
+  void _showUserAllCharts(BuildContext context, String agentName, String userId, List<QueryDocumentSnapshot> bets) {
+    // Unique chatIds nikalo
+    List<String> chatIds = bets
+        .map((d) => (d.data() as Map<String, dynamic>)['chatId']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF0B141A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.88),
+          child: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1F2C34),
+                    borderRadius: BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
                   ),
-                  // Original bid text
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.all(12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: const Color(0xFF005D4B), borderRadius: BorderRadius.circular(12)),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(agentName, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                          Text("${chatIds.length} chart${chatIds.length > 1 ? 's' : ''}", style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                        ],
+                      ),
+                      IconButton(icon: const Icon(Icons.close, color: Colors.white54), onPressed: () => Navigator.pop(ctx)),
+                    ],
+                  ),
+                ),
+
+                // Scrollable body - har chatId ka chart original format mein
+                Flexible(
+                  child: SingleChildScrollView(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text("📋 Original Bid Text:", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 6),
-                        Text(text, style: const TextStyle(color: Colors.white, fontSize: 14)),
-                        const SizedBox(height: 8),
-                        const Divider(color: Colors.white24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text("Total: ₹$total", style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
-                            Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 10)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  // All bets for this game on this date
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    child: Row(
-                      children: [
-                        Icon(Icons.bar_chart, color: Colors.amber, size: 14),
-                        SizedBox(width: 6),
-                        Text("सर्व बेट्स - या तारखेसाठी (All Bets This Date):", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                  if (gameId.isNotEmpty)
-                    FutureBuilder<QuerySnapshot>(
-                      future: FirebaseFirestore.instance.collection('bets')
-                          .where('chatId', isEqualTo: chatId)
-                          .get(),
-                      builder: (context, betSnap) {
-                        if (betSnap.connectionState == ConnectionState.waiting) {
-                          return const Padding(
-                            padding: EdgeInsets.all(16),
-                            child: CircularProgressIndicator(color: Colors.amber),
-                          );
-                        }
-                        if (!betSnap.hasData || betSnap.data!.docs.isEmpty) {
-                          return const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: Text("No bet details found", style: TextStyle(color: Colors.white54, fontSize: 12)),
-                          );
-                        }
-                        var bets = betSnap.data!.docs;
-                        return ConstrainedBox(
-                          constraints: const BoxConstraints(maxHeight: 250),
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(color: const Color(0xFF1F2C34), borderRadius: BorderRadius.circular(8)),
-                            child: Column(
+                        if (chatIds.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Center(child: Text("कोणताही चार्ट सापडला नाही", style: TextStyle(color: Colors.white54))),
+                          ),
+                        ...chatIds.map((chatId) => FutureBuilder<DocumentSnapshot>(
+                          future: FirebaseFirestore.instance
+                              .collection('users')
+                              .doc(userId)
+                              .collection('game_chats')
+                              .doc(chatId)
+                              .get(),
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return const Padding(
+                                padding: EdgeInsets.all(16),
+                                child: Center(child: CircularProgressIndicator(color: Colors.amber)),
+                              );
+                            }
+                            if (!snapshot.hasData || !snapshot.data!.exists) {
+                              return const SizedBox.shrink();
+                            }
+
+                            var chatData = snapshot.data!.data() as Map<String, dynamic>;
+                            String text = chatData['text'] ?? '';
+                            int total = int.tryParse(chatData['total']?.toString() ?? '') ?? 0;
+                            String gameId = chatData['gameId'] ?? '';
+                            var time = (chatData['timestamp'] as Timestamp?)?.toDate();
+                            String timeStr = time != null ? DateFormat('dd MMM yyyy, hh:mm a').format(time) : '';
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Header row
+                                // ── Original Bid Text (green bubble - same as before) ──
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                  decoration: const BoxDecoration(color: Color(0xFF2A3942), borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8))),
-                                  child: const Row(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(color: const Color(0xFF005D4B), borderRadius: BorderRadius.circular(12)),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Expanded(flex: 2, child: Text("Number", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
-                                      Expanded(flex: 2, child: Text("Type", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
-                                      Expanded(child: Text("₹ Amt", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
-                                      Expanded(child: Text("Status", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                      const Text("📋 Original Bid Text:", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                                      const SizedBox(height: 6),
+                                      Text(text, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                                      const SizedBox(height: 8),
+                                      const Divider(color: Colors.white24),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text("Total: ₹$total", style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                                          Text(timeStr, style: const TextStyle(color: Colors.white54, fontSize: 10)),
+                                        ],
+                                      ),
                                     ],
                                   ),
                                 ),
-                                Expanded(
-                                  child: ListView.builder(
-                                    itemCount: bets.length,
-                                    itemBuilder: (ctx, i) {
-                                      var bd = bets[i].data() as Map<String, dynamic>;
-                                      String statusStr = bd['status'] ?? 'pending';
-                                      Color statusColor = statusStr == 'won' ? Colors.green : (statusStr == 'loss' ? Colors.red : Colors.orange);
+
+                                // ── All Bets label ──
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.bar_chart, color: Colors.amber, size: 14),
+                                      SizedBox(width: 6),
+                                      Text("सर्व बेट्स - या तारखेसाठी (All Bets This Date):", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold)),
+                                    ],
+                                  ),
+                                ),
+
+                                // ── Bets Table - ALL statuses (won/loss/pending sab) ──
+                                if (gameId.isNotEmpty)
+                                  FutureBuilder<QuerySnapshot>(
+                                    future: FirebaseFirestore.instance
+                                        .collection('bets')
+                                        .where('chatId', isEqualTo: chatId)
+                                        .get(),
+                                    builder: (context, betSnap) {
+                                      if (betSnap.connectionState == ConnectionState.waiting) {
+                                        return const Padding(
+                                          padding: EdgeInsets.all(16),
+                                          child: Center(child: CircularProgressIndicator(color: Colors.amber)),
+                                        );
+                                      }
+                                      if (!betSnap.hasData || betSnap.data!.docs.isEmpty) {
+                                        return const Padding(
+                                          padding: EdgeInsets.all(12),
+                                          child: Text("No bet details found", style: TextStyle(color: Colors.white54, fontSize: 12)),
+                                        );
+                                      }
+                                      var betDocs = betSnap.data!.docs;
                                       return Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white12))),
-                                        child: Row(
+                                        margin: const EdgeInsets.symmetric(horizontal: 12),
+                                        decoration: BoxDecoration(color: const Color(0xFF1F2C34), borderRadius: BorderRadius.circular(8)),
+                                        child: Column(
                                           children: [
-                                            Expanded(flex: 2, child: Text(bd['number']?.toString() ?? '', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
-                                            Expanded(flex: 2, child: Text(bd['betType']?.toString() ?? '', style: const TextStyle(color: Colors.white70, fontSize: 10))),
-                                            Expanded(child: Text("₹${bd['amount']}", style: const TextStyle(color: Colors.greenAccent, fontSize: 12))),
-                                            Expanded(child: Text(statusStr.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold))),
+                                            // Table header
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                              decoration: const BoxDecoration(
+                                                color: Color(0xFF2A3942),
+                                                borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+                                              ),
+                                              child: const Row(
+                                                children: [
+                                                  Expanded(flex: 2, child: Text("Number", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                                  Expanded(flex: 2, child: Text("Type", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                                  Expanded(child: Text("₹ Amt", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                                  Expanded(child: Text("Status", style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold))),
+                                                  SizedBox(width: 32, child: Text("Del", style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold))),
+                                                ],
+                                              ),
+                                            ),
+                                            // Rows - NO status filter, sab dikhao
+                                            ListView.builder(
+                                              shrinkWrap: true,
+                                              physics: const NeverScrollableScrollPhysics(),
+                                              itemCount: betDocs.length,
+                                              itemBuilder: (ctx, i) {
+                                                var bd = betDocs[i].data() as Map<String, dynamic>;
+                                                String betDocId = betDocs[i].id;
+                                                String betUserId = bd['userId']?.toString() ?? '';
+                                                int betAmount = int.tryParse(bd['amount']?.toString() ?? '') ?? 0;
+                                                String statusStr = bd['status'] ?? 'pending';
+                                                Color statusColor = statusStr == 'won'
+                                                    ? Colors.green
+                                                    : (statusStr == 'loss' ? Colors.red : Colors.orange);
+                                                return Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                                  decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white12))),
+                                                  child: Row(
+                                                    children: [
+                                                      Expanded(flex: 2, child: Text(bd['number']?.toString() ?? '', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))),
+                                                      Expanded(flex: 2, child: Text(bd['betType']?.toString() ?? '', style: const TextStyle(color: Colors.white70, fontSize: 10))),
+                                                      Expanded(child: Text("₹${bd['amount']}", style: const TextStyle(color: Colors.greenAccent, fontSize: 12))),
+                                                      Expanded(child: Text(statusStr.toUpperCase(), style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold))),
+                                                      SizedBox(
+                                                        width: 32,
+                                                        child: GestureDetector(
+                                                          onTap: () {
+                                                            Navigator.pop(ctx); // Dialog band karo
+                                                            _deleteBid(betDocId, betAmount, betUserId);
+                                                          },
+                                                          child: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                              },
+                                            ),
                                           ],
                                         ),
                                       );
                                     },
                                   ),
-                                ),
+                                const SizedBox(height: 16),
                               ],
-                            ),
-                          ),
-                        );
-                      },
+                            );
+                          },
+                        )),
+                      ],
                     ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx), 
-                    child: const Text("बंद करा (Close)", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold))
                   ),
-                  const SizedBox(height: 8),
-                ],
-              ),
+                ),
+
+                // Close button
+                Container(
+                  width: double.infinity,
+                  decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.white12))),
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text("बंद करा (Close)", style: TextStyle(color: Colors.amber, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
             ),
-          );
-        },
+          ),
+        ),
       ),
     );
   }
@@ -413,13 +692,15 @@ class _UserBidManagePageState extends State<UserBidManagePage> {
                     // Game Filter
                     Expanded(
                       child: StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance.collection('games').orderBy('order').snapshots(),
+                        stream: FirebaseFirestore.instance.collection('game_settings')
+                            .where('adminId', isEqualTo: widget.currentAdminId)
+                            .snapshots(),
                         builder: (context, snapshot) {
                           List<DropdownMenuItem<String>> items = [const DropdownMenuItem(value: null, child: Text("--सर्व गेम (All Games)--", style: TextStyle(color: kTextGrey, fontSize: 13)))];
                           if (snapshot.hasData) {
                             for(var doc in snapshot.data!.docs) {
                               var data = doc.data() as Map<String, dynamic>;
-                              items.add(DropdownMenuItem(value: doc.id, child: Text(data['name'] ?? '', style: const TextStyle(color: kTextMain, fontSize: 13, fontWeight: FontWeight.bold))));
+                              items.add(DropdownMenuItem(value: data['gameId'] ?? doc.id, child: Text(data['gameName'] ?? data['name'] ?? '', style: const TextStyle(color: kTextMain, fontSize: 13, fontWeight: FontWeight.bold))));
                             }
                           }
                           return Container(
@@ -561,8 +842,8 @@ class _UserBidManagePageState extends State<UserBidManagePage> {
                                 userTotal: userTotal,
                                 bets: userDocs,
                                 agentCache: _agentNamesCache,
+                                onTap: () => _showUserAllCharts(context, agentName, uId, userDocs),
                                 onDelete: _deleteBid,
-                                onChartTap: (uid, chatId) => _showFullChart(context, uid, chatId),
                                 buildStatusBadge: _buildStatusBadge,
                               );
                             },
@@ -579,15 +860,15 @@ class _UserBidManagePageState extends State<UserBidManagePage> {
   }
 }
 
-// --- GROUPED USER BID CARD (1 card per user, expandable) ---
-class _UserBidCard extends StatefulWidget {
+// --- GROUPED USER BID CARD ---
+class _UserBidCard extends StatelessWidget {
   final String agentName;
   final String userId;
   final int userTotal;
   final List<QueryDocumentSnapshot> bets;
   final Map<String, String> agentCache;
+  final VoidCallback onTap;
   final Function(String, int, String) onDelete;
-  final Function(String, String) onChartTap;
   final Widget Function(String) buildStatusBadge;
 
   const _UserBidCard({
@@ -596,144 +877,57 @@ class _UserBidCard extends StatefulWidget {
     required this.userTotal,
     required this.bets,
     required this.agentCache,
+    required this.onTap,
     required this.onDelete,
-    required this.onChartTap,
     required this.buildStatusBadge,
   });
 
   @override
-  State<_UserBidCard> createState() => _UserBidCardState();
-}
-
-class _UserBidCardState extends State<_UserBidCard> {
-  bool _expanded = false;
-
-  @override
   Widget build(BuildContext context) {
-    String initials = widget.agentName.isNotEmpty ? widget.agentName[0].toUpperCase() : '?';
+    String initials = agentName.isNotEmpty ? agentName[0].toUpperCase() : '?';
 
     return Card(
       elevation: 2,
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: _expanded ? kPrimary.withOpacity(0.4) : Colors.grey.shade200, width: 1.5),
+        side: BorderSide(color: Colors.grey.shade200, width: 1.5),
       ),
       color: Colors.white,
-      child: Column(
-        children: [
-          // Collapsed header
-          InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 42, height: 42,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: kPrimary.withOpacity(0.12)),
+                child: Center(child: Text(initials, style: const TextStyle(color: kPrimary, fontWeight: FontWeight.bold, fontSize: 18))),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(agentName, style: const TextStyle(color: kPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text("${bets.length} bid${bets.length > 1 ? 's' : ''}", style: const TextStyle(color: kTextGrey, fontSize: 12)),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Container(
-                    width: 42, height: 42,
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: kPrimary.withOpacity(0.12)),
-                    child: Center(child: Text(initials, style: const TextStyle(color: kPrimary, fontWeight: FontWeight.bold, fontSize: 18))),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(widget.agentName, style: const TextStyle(color: kPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
-                        Text("${widget.bets.length} bid${widget.bets.length > 1 ? 's' : ''}", style: const TextStyle(color: kTextGrey, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text("₹${widget.userTotal}", style: const TextStyle(color: kSuccess, fontWeight: FontWeight.bold, fontSize: 18)),
-                      Text("Total", style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
-                    ],
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(_expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down, color: kPrimary),
+                  Text("₹$userTotal", style: const TextStyle(color: kSuccess, fontWeight: FontWeight.bold, fontSize: 18)),
+                  Text("Total", style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
                 ],
               ),
-            ),
+              const SizedBox(width: 8),
+              const Icon(Icons.bar_chart_rounded, color: kPrimary, size: 22),
+            ],
           ),
-
-          // Expanded bets
-          if (_expanded) ...[
-            const Divider(height: 1, color: Colors.black12),
-            ...widget.bets.map((doc) {
-              var data = doc.data() as Map<String, dynamic>;
-              String gameName = data['gameName'] ?? '-';
-              String session = data['session'] ?? 'Open';
-              String betType = data['betType'] ?? '-';
-              String number = data['number']?.toString() ?? '-';
-              int amount = int.tryParse(data['amount']?.toString() ?? '') ?? 0;
-              String status = data['status'] ?? 'pending';
-              Timestamp? ts = data['timestamp'];
-              String timeStr = ts != null ? DateFormat('hh:mm a').format(ts.toDate()) : '';
-              String? chatId = data['chatId'];
-
-              return InkWell(
-                onTap: chatId != null ? () => widget.onChartTap(widget.userId, chatId) : null,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.black12))),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text("$gameName ($session)", style: const TextStyle(fontWeight: FontWeight.bold, color: kTextMain, fontSize: 13)),
-                                Text(betType, style: const TextStyle(color: kTextGrey, fontSize: 12)),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                            decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-                            child: Column(
-                              children: [
-                                const Text("Number", style: TextStyle(fontSize: 9, color: Colors.blueGrey)),
-                                Text(number, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blue.shade900)),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                                Text("₹$amount", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: kSuccess)),
-                                const SizedBox(height: 3),
-                                widget.buildStatusBadge(status),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(timeStr, style: const TextStyle(color: Colors.grey, fontSize: 11)),
-                          if (status == 'pending')
-                            InkWell(
-                              onTap: () => widget.onDelete(doc.id, amount, widget.userId),
-                              child: const Text("Delete Bid", style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
-                            ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }),
-          ],
-        ],
+        ),
       ),
     );
   }
