@@ -1514,31 +1514,36 @@ Future<void> _updateResultAndProcessWins(
               // WIN declare pe: limit += netJama + betAmount
               // betAmount wapas isliye ki bet lagane par limit se deduct hua tha
               // netJama = winAmount - netBetAmount (commission cut ke baad)
+              //
               // Example: limit=5000, bet=20, comm=10%, win=3200
               //   netBet = 20*(1-0.1) = 18
-              //   netJama = 3200 - 18 = 3182
-              //   limitToAdd = 3182 + 20 = 3202  ← betAmount bhi wapas
+              //   netJama = 3200 - 18 = 3182   ← ADMIN KO YAHI VATAP KARNA HAI
+              //   limitToAdd = 3182 + 20 = 3202 ← limit mein yahi add hota hai
               //   finalLimit = 4980 + 3202 = 8182
+              //
+              //   Vatap ke baad: 8182 - 3182 = 5000 (original limit wapas) ✅
               // ────────────────────────────────────────────────────────────────
               final currentLimit    = int.tryParse(uMap['limit']?.toString() ?? '') ?? 0;
               final commissionPct   = double.tryParse(uMap['commission']?.toString() ?? '0') ?? 0.0;
               final commissionRate  = commissionPct / 100.0;
               // netBetAmount = commission ke baad jo admin ka dhanda bacha
               final double netBetAmt = betAmount * (1.0 - commissionRate);
-              // netJama = jeeti raqam - net dhanda
+              // netJama = jeeti raqam - net dhanda = EXACT amount admin ko user ko dena hai
               final int netJama = (winAmount - netBetAmt).round();
-              // betAmount bhi wapas add karo (jo bet lagane par deduct hua tha)
+              // limitToAdd = netJama + betAmount (bet refund)
               final int limitToAdd  = (netJama > 0 ? netJama : winAmount) + betAmount;
               tx.update(userRef, {
-                'balance': currentBalance + limitToAdd, // Net jama (win - netDhanda)
-                'limit':   currentLimit   + limitToAdd, // Net jama limit mein add
+                'balance': currentBalance + limitToAdd,
+                'limit':   currentLimit   + limitToAdd,
               });
-              // limitAdded bet document mein store karo — reversal ke liye exact amount
-              tx.update(betDoc.reference, {'limitAdded': limitToAdd});
+              // limitAdded aur netJama dono store karo
+              tx.update(betDoc.reference, {'limitAdded': limitToAdd, 'netJama': netJama});
               tx.set(FirebaseFirestore.instance.collection('transactions').doc(), {
                 'userId'         : userId,
-                'amount'         : winAmount,
+                'amount'         : winAmount,   // gross win amount
                 'betAmount'      : betAmount,
+                'netJama'        : netJama,     // ← ADMIN KO YAHI VATAP KARNA HAI
+                'commission'     : netBetAmt.round(),
                 'limitAdded'     : limitToAdd,
                 'type'           : 'win',
                 'previousBalance': currentBalance,
@@ -1547,7 +1552,7 @@ Future<void> _updateResultAndProcessWins(
                 'newLimit'       : currentLimit + limitToAdd,
                 'timestamp'      : FieldValue.serverTimestamp(),
                 'adminId'        : adminId,
-                'note'           : 'Win: $gameName ($num)',
+                'note'           : 'Win: $gameName ($num) | Vatap karo: ₹$netJama',
               });
             }
           }

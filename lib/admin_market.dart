@@ -388,7 +388,7 @@ class _AdminGameLedgerScreenState extends State<AdminGameLedgerScreen> {
                     
                     var docs = snapshot.data?.docs ?? [];
                     
-                    // Filter by Date AND Selected User
+                    // Filter by Date AND Selected User (only this admin's agents)
                     docs = docs.where((doc) {
                       var data = doc.data() as Map<String, dynamic>;
                       Timestamp? ts = data['timestamp'];
@@ -396,7 +396,8 @@ class _AdminGameLedgerScreenState extends State<AdminGameLedgerScreen> {
                       DateTime dt = ts.toDate();
                       bool dateMatch = dt.year == _selectedDate.year && dt.month == _selectedDate.month && dt.day == _selectedDate.day;
                       
-                      bool userMatch = true;
+                      // ✅ FIX: Sirf is admin ke agents ke bets dikhao
+                      bool userMatch = agentDataMap.containsKey(data['userId']);
                       if (_selectedUserId != null) {
                         userMatch = data['userId'] == _selectedUserId;
                       }
@@ -437,13 +438,20 @@ class _AdminGameLedgerScreenState extends State<AdminGameLedgerScreen> {
 
                     double totalDhanda = openDhanda + closeDhanda;
                     
-                    // Commission Logic based on specific user vs all users
+                    // ✅ FIX: Commission — har agent ka dynamic rate, no hardcoded 10%
                     double commission = 0;
                     if (_selectedUserId != null && agentDataMap.containsKey(_selectedUserId)) {
-                       double customComm = (agentDataMap[_selectedUserId]!['commission'] ?? 10).toDouble() / 100.0;
-                       commission = totalDhanda * customComm;
+                       double customComm = (agentDataMap[_selectedUserId]!['commission'] as num?)?.toDouble() ?? 0.0;
+                       commission = totalDhanda * (customComm / 100.0);
                     } else {
-                       commission = totalDhanda * 0.10; 
+                       // All agents: per-agent dynamic commission
+                       for (var betDoc in docs) {
+                         var bd = betDoc.data() as Map<String, dynamic>;
+                         double amt = double.tryParse(bd['amount']?.toString() ?? '') ?? 0.0;
+                         String uId = bd['userId']?.toString() ?? '';
+                         double uCommRate = (agentDataMap[uId]?['commission'] as num?)?.toDouble() ?? 0.0;
+                         commission += amt * (uCommRate / 100.0);
+                       }
                     }
 
                     double totalPayment = openSinglePay + openPannaPay + closeSinglePay + closePannaPay + jodiPay;

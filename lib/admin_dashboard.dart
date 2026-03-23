@@ -716,18 +716,21 @@ class _AdminSlipPageState extends State<AdminSlipPage> {
                         return const Center(child: Text("No Data", style: TextStyle(color: kTextGrey)));
                       }
 
-                      // ── 1. Date filter ──
+                      // ── 1. Date filter + sirf is admin ke agents ──
                       var docs = snapshot.data!.docs.where((doc) {
                         var data = doc.data() as Map<String, dynamic>;
                         Timestamp? ts = data['timestamp'];
                         if (ts == null) return false;
                         DateTime dt = ts.toDate();
-                        return dt.year == _selectedDate.year &&
+                        bool dateMatch = dt.year == _selectedDate.year &&
                             dt.month == _selectedDate.month &&
                             dt.day == _selectedDate.day;
+                        // ✅ Sirf is admin ke agents ke bets — dusre admin ka data nahi
+                        bool isMyAgent = userCommMap.containsKey(data['userId']?.toString() ?? '');
+                        return dateMatch && isMyAgent;
                       }).toList();
 
-                      // ── 2. Agent filter (NEW) ──
+                      // ── 2. Agent filter ──
                       if (_selectedAgentId != null) {
                         docs = docs.where((doc) {
                           var data = doc.data() as Map<String, dynamic>;
@@ -2044,10 +2047,10 @@ class _AgentPaymentPageState extends State<AgentPaymentPage> {
                         selectedType == 'vasuli'
                             ? "✅ वसुली: Agent ने Loss Cash दिला.\n"
                               "   • Balance कमी होईल\n"
-                              "   • Limit वाढेल (bet amount wapas)"
+                              "   • Limit पूर्ण Restore होईल (Original Limit वर)"
                             : "✅ वाटप: Admin ने Win Amount दिली.\n"
                               "   • Balance कमी होईल\n"
-                              "   • Limit कमी होईल (win credit undo — wapas bet-state mein)",
+                              "   • Limit कमी होईल (win credit undo — wapas bet-state मein)",
                         style: TextStyle(
                           color: selectedType == 'vasuli'
                               ? Colors.blue.shade800
@@ -2203,6 +2206,9 @@ class _AgentPaymentPageState extends State<AgentPaymentPage> {
 
                   setStateBuilder(() => isSubmitting = true);
 
+                  // Snackbar mein dikhane ke liye — transaction ke bahar bhi accessible rahega
+                  int resolvedSetLimit = 0;
+
                   try {
                     await FirebaseFirestore.instance.runTransaction((transaction) async {
                       DocumentReference userRef =
@@ -2216,14 +2222,17 @@ class _AgentPaymentPageState extends State<AgentPaymentPage> {
                       int currentLimit = int.tryParse(uData['limit']?.toString() ?? '') ?? 0;
                       // setLimit = original limit jo admin ne set ki thi (kabhi auto nahi badli)
                       int setLimit     = int.tryParse(uData['setLimit']?.toString() ?? '') ?? currentLimit;
+                      resolvedSetLimit = setLimit; // ← outer scope mein save karo
 
                       int newBal;
                       int newLimit;
 
                       if (selectedType == 'vasuli') {
-                        // ── VASULI: Agent ne cash diya → balance ghatta, limit badhti hai ──
-                        newBal   = currentBal   - enteredAmt;
-                        newLimit = currentLimit + enteredAmt;
+                        // ── VASULI: Agent ne loss cash diya → balance ghatta, limit FULL restore hoti hai ──
+                        // WIN ki tarah: jaise win pe limit auto restore hoti hai, vasuli pe bhi
+                        // setLimit tak restore karo — agent ka credit limit wapas original pe aa jata hai
+                        newBal   = currentBal - enteredAmt;
+                        newLimit = setLimit; // ← Original limit restore (WIN jaisa behavior)
                       } else {
                         // ── VATAP: Admin ne paisa diya → balance ghatta, limit bhi ghatti hai ──
                         // Koi validation nahi — win ya kuch bhi vatap kar sakte hain
@@ -2270,7 +2279,7 @@ class _AgentPaymentPageState extends State<AgentPaymentPage> {
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                         content: Text(selectedType == 'vasuli'
-                            ? "✅ वसुली! ₹$enteredAmt cash मिळाला. Limit +₹$enteredAmt वाढली."
+                            ? "✅ वसुली! ₹$enteredAmt cash मिळाला. Limit पूर्ण Restore → ₹$resolvedSetLimit"
                             : "✅ वाटप! ₹$enteredAmt Win दिले. Limit -₹$enteredAmt कमी झाली."),
                         backgroundColor: Colors.green,
                         duration: const Duration(seconds: 4),
@@ -4282,6 +4291,12 @@ class _AgentPaymentHistoryScreenState extends State<AgentPaymentHistoryScreen> {
                 }
 
                 var docs = snapshot.data!.docs.toList();
+
+                // Win auto-transactions hamesha hide karo — sirf vasuli/vatap dikhao
+                docs = docs.where((doc) {
+                  final t = (doc.data() as Map<String, dynamic>)['type']?.toString() ?? '';
+                  return t != 'win' && t != 'win_reversal';
+                }).toList();
                 
                 if (_filterType != 'All') {
                   docs = docs.where((doc) {
@@ -4413,7 +4428,7 @@ class _AgentPaymentHistoryScreenState extends State<AgentPaymentHistoryScreen> {
                                     style: const TextStyle(color: kTextMain, fontSize: 12, fontWeight: FontWeight.bold)),
                               ],
                             ),
-                            if (isVatap && data['previousLimit'] != null) ...[
+                            if (data['previousLimit'] != null) ...[
                               const SizedBox(height: 4),
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -4421,16 +4436,11 @@ class _AgentPaymentHistoryScreenState extends State<AgentPaymentHistoryScreen> {
                                   Text("Prev Limit: ₹$prevLim",
                                       style: const TextStyle(color: kTextGrey, fontSize: 12)),
                                   Text("New Limit: ₹$newLim",
-                                      style: const TextStyle(
-                                          color: Colors.orange, fontSize: 12, fontWeight: FontWeight.bold)),
+                                      style: TextStyle(
+                                          color: isVasuli ? Colors.blue.shade700 : Colors.green.shade700,
+                                          fontSize: 12, fontWeight: FontWeight.bold)),
                                 ],
                               ),
-                            ],
-                            if (note.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Text("Note: $note",
-                                  style: const TextStyle(
-                                      color: Colors.blueGrey, fontSize: 12, fontStyle: FontStyle.italic)),
                             ],
                           ],
                         ),
